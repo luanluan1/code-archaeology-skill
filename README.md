@@ -218,25 +218,49 @@ python skill/code-archaeology/scripts/render_timeline_html.py \
 
 后续又用本项目自身跑目录级真实测试，发现并修复了 Windows UTF-8 解码问题，回归测试已加入 `tests/test_collect_git_history.py`。
 
-本次功能扩展也用本仓库自身做了真实联通测试：
+本次功能扩展还做了两组本机安装版真实联通测试。
+
+第一组直接调用安装到 `~/.codex/skills/code-archaeology` 的 skill，对本仓库自身做采集、AST 分析、远端探测和 HTML 渲染：
 
 ```bash
-python skill/code-archaeology/scripts/collect_git_history.py \
+python ~/.codex/skills/code-archaeology/scripts/collect_git_history.py \
   --repo . \
-  --max-commits 25 \
-  --top-k 8 \
+  --max-commits 30 \
+  --top-k 10 \
   --ast-diff \
   --remote-context auto \
-  --remote-limit 3 \
-  --output .tmp-real/self-evidence.json \
+  --remote-limit 5 \
+  --output .tmp-real/installed-skill-evidence.json \
   skill/code-archaeology/scripts/collect_git_history.py
 
-python skill/code-archaeology/scripts/render_timeline_html.py \
-  .tmp-real/self-evidence.json \
-  --output .tmp-real/self-timeline.html
+python ~/.codex/skills/code-archaeology/scripts/render_timeline_html.py \
+  .tmp-real/installed-skill-evidence.json \
+  --output .tmp-real/installed-skill-timeline.html
 ```
 
-真实结果：采集到 `2` 个相关 commit，Python AST 分析 `2` 个文件版本成功，识别出 `import_changed`、`symbol_added`、`signature_changed`、`function_body_changed` 等信号；远端识别为 GitHub，本仓库这些提交没有关联 PR artifact，warning 为空；HTML 时间线成功生成。
+真实结果：采集到 `3` 个相关 commit，Python AST 分析 `3` 个文件版本成功，识别出 `function_body_changed`、`import_changed`、`semantic_change`、`signature_changed`、`symbol_added`；远端识别为 GitHub，本仓库这些提交没有关联 PR artifact，warning 为空；HTML 时间线成功生成。
+
+第二组用真实公开仓库 `pallets/click` 验证 GitHub PR 证据抓取：
+
+```bash
+git clone --depth=200 https://github.com/pallets/click.git .tmp-real/pallets-click
+
+python ~/.codex/skills/code-archaeology/scripts/collect_git_history.py \
+  --repo .tmp-real/pallets-click \
+  --max-commits 12 \
+  --top-k 6 \
+  --ast-diff \
+  --remote-context auto \
+  --remote-limit 6 \
+  --output .tmp-real/click-installed-evidence.json \
+  src/click/core.py
+
+python ~/.codex/skills/code-archaeology/scripts/render_timeline_html.py \
+  .tmp-real/click-installed-evidence.json \
+  --output .tmp-real/click-installed-timeline.html
+```
+
+真实结果：采集到 `12` 个相关 commit，Python AST 分析 `12` 个文件版本成功，GitHub API 返回 `9` 个 PR artifact，示例包括 `GH-PR-3404`、`GH-PR-3578`、`GH-PR-3509`，远端 warning 为空，HTML 时间线成功生成。该测试为了速度使用浅克隆，所以 `history_complete=false`，报告中不能据此声称“最早/首次”。
 
 ## 仓库结构
 

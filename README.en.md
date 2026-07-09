@@ -216,25 +216,49 @@ This repository was smoke-tested against the real public repository `pallets/cli
 
 See [examples/click-core-summary.json](examples/click-core-summary.json) and [examples/sample-report.md](examples/sample-report.md).
 
-This feature expansion was also tested against this repository itself:
+This feature expansion was also tested with two local installed-skill smoke tests.
+
+The first test called the skill installed under `~/.codex/skills/code-archaeology` and ran collection, AST analysis, remote detection, and HTML rendering against this repository:
 
 ```bash
-python skill/code-archaeology/scripts/collect_git_history.py \
+python ~/.codex/skills/code-archaeology/scripts/collect_git_history.py \
   --repo . \
-  --max-commits 25 \
-  --top-k 8 \
+  --max-commits 30 \
+  --top-k 10 \
   --ast-diff \
   --remote-context auto \
-  --remote-limit 3 \
-  --output .tmp-real/self-evidence.json \
+  --remote-limit 5 \
+  --output .tmp-real/installed-skill-evidence.json \
   skill/code-archaeology/scripts/collect_git_history.py
 
-python skill/code-archaeology/scripts/render_timeline_html.py \
-  .tmp-real/self-evidence.json \
-  --output .tmp-real/self-timeline.html
+python ~/.codex/skills/code-archaeology/scripts/render_timeline_html.py \
+  .tmp-real/installed-skill-evidence.json \
+  --output .tmp-real/installed-skill-timeline.html
 ```
 
-Real result: `2` related commits collected, `2` Python AST file versions analyzed successfully, semantic flags included `import_changed`, `symbol_added`, `signature_changed`, and `function_body_changed`; the remote was recognized as GitHub, these commits had no linked PR artifacts, warnings were empty, and the HTML timeline was generated successfully.
+Real result: `3` related commits collected, `3` Python AST file versions analyzed successfully, semantic flags included `function_body_changed`, `import_changed`, `semantic_change`, `signature_changed`, and `symbol_added`; the remote was recognized as GitHub, these commits had no linked PR artifacts, warnings were empty, and the HTML timeline was generated successfully.
+
+The second test used the real public repository `pallets/click` to verify GitHub PR evidence fetching:
+
+```bash
+git clone --depth=200 https://github.com/pallets/click.git .tmp-real/pallets-click
+
+python ~/.codex/skills/code-archaeology/scripts/collect_git_history.py \
+  --repo .tmp-real/pallets-click \
+  --max-commits 12 \
+  --top-k 6 \
+  --ast-diff \
+  --remote-context auto \
+  --remote-limit 6 \
+  --output .tmp-real/click-installed-evidence.json \
+  src/click/core.py
+
+python ~/.codex/skills/code-archaeology/scripts/render_timeline_html.py \
+  .tmp-real/click-installed-evidence.json \
+  --output .tmp-real/click-installed-timeline.html
+```
+
+Real result: `12` related commits collected, `12` Python AST file versions analyzed successfully, the GitHub API returned `9` PR artifacts, including `GH-PR-3404`, `GH-PR-3578`, and `GH-PR-3509`; remote warnings were empty, and the HTML timeline was generated successfully. This test used a shallow clone for speed, so `history_complete=false` and reports must not claim "earliest" or "first-ever" from it.
 
 ## Repository Layout
 
