@@ -23,6 +23,8 @@
 
 运行时不依赖 GitHub API，也不会编造 PR、issue 或作者动机。如果本地 git 历史证明不了，报告必须明确写成未知。
 
+当前版本专注本地 git 历史；PR、issue、远端平台数据可以作为后续扩展。
+
 ## 能输出什么
 
 ```markdown
@@ -218,19 +220,6 @@ PowerShell：
 $env:PYTHONUTF8 = "1"
 python "$HOME\.codex\skills\.system\skill-creator\scripts\quick_validate.py" "skill\code-archaeology"
 ```
-
-## 非目标
-
-MVP 暂不做：
-
-- GitHub/GitLab PR 或 issue 挖掘
-- 组织政治或作者动机推断
-- 基于提交数的 owner 绩效判断
-- AST 级语义 diff
-- 可视化时间线 UI
-- 自动重构建议
-
-第一版只做一件更窄也更有价值的事：让本地 git 历史变得可解释、可审计，并能帮助人类安全修改高风险代码。
 
 ## License
 

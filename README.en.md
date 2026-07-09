@@ -23,6 +23,8 @@ It collects local git evidence first, asks Codex to inspect the important diffs,
 
 No GitHub API is required at runtime. No PR or issue history is invented. If the local git history cannot prove something, the report must say so.
 
+The current version focuses on local git history; PRs, issues, and remote platform data can be added later.
+
 ## What It Produces
 
 ```markdown
@@ -216,19 +218,6 @@ PowerShell:
 $env:PYTHONUTF8 = "1"
 python "$HOME\.codex\skills\.system\skill-creator\scripts\quick_validate.py" "skill\code-archaeology"
 ```
-
-## Non-Goals
-
-MVP intentionally does not do:
-
-- GitHub/GitLab PR or issue mining
-- automated organization politics
-- owner performance analysis
-- AST-level semantic diff
-- visual timeline UI
-- automatic refactor advice
-
-The first job is narrower and more valuable: make local git history explainable, auditable, and useful before a human touches risky code.
 
 ## License
 
