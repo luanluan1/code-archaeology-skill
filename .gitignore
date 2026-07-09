@@ -10,5 +10,9 @@ htmlcov/
 tmp/
 temp/
 
+# Project-local installs created by `npx skills add` during testing.
+.agents/
+skills-lock.json
+
 # Large raw collector dumps are useful locally but noisy in the repository.
 examples/*-evidence.json

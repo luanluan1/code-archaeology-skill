@@ -51,7 +51,7 @@
 
 ### 方式一：一句话安装（推荐，跨 runtime）
 
-打开你正在使用的 agent，例如 Codex、Claude Code、Cursor、OpenCode、Gemini CLI 等，告诉它：
+打开你正在使用的 agent runtime，例如 Codex 或其他支持 Agent Skills 的工具，告诉它：
 
 ```text
 帮我安装这个 skill: https://github.com/luanluan1/code-archaeology-skill
@@ -64,6 +64,8 @@ npx skills add luanluan1/code-archaeology-skill
 ```
 
 需要指定 runtime 时，可按 CLI 提示追加参数，例如 `-a codex`、`-a claude-code`、`-a cursor`。
+
+想安装为用户级全局 skill 时，可以加 `-g`。
 
 ### 方式二：手动安装
 

@@ -51,7 +51,7 @@ The skill is designed for engineers taking over a code area, preparing a refacto
 
 ### Method 1: One-Line Agent Install (Recommended)
 
-Open the agent runtime you use, such as Codex, Claude Code, Cursor, OpenCode, or Gemini CLI, and tell it:
+Open the agent runtime you use, such as Codex or another Agent Skills compatible tool, and tell it:
 
 ```text
 Install this skill: https://github.com/luanluan1/code-archaeology-skill
@@ -64,6 +64,8 @@ npx skills add luanluan1/code-archaeology-skill
 ```
 
 When needed, add a runtime flag as prompted by the CLI, such as `-a codex`, `-a claude-code`, or `-a cursor`.
+
+Use `-g` when you want a user-level global install.
 
 ### Method 2: Manual Install
 
