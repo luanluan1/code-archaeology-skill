@@ -1,0 +1,126 @@
+{
+  "repo": "pallets/click",
+  "target": "src/click/core.py",
+  "head": "8a4ce842564a",
+  "history_complete": true,
+  "commit_count": 80,
+  "top_commits": [
+    {
+      "sha": "c653ec820093",
+      "date": "2026-04-09",
+      "subject": "Reconcile default value passing and default activation",
+      "score": 63.07,
+      "flags": [
+        "bugfix",
+        "revert"
+      ]
+    },
+    {
+      "sha": "955ca492a6b9",
+      "date": "2025-11-19",
+      "subject": "Cleanup changes to fix flag_value bug",
+      "score": 52.25,
+      "flags": [
+        "bugfix",
+        "refactor"
+      ]
+    },
+    {
+      "sha": "bb7be1f6a91f",
+      "date": "2026-03-02",
+      "subject": "Revert \"Use `default=True` as a sentinel for non-boolean flags\"",
+      "score": 51.37,
+      "flags": [
+        "revert"
+      ]
+    },
+    {
+      "sha": "9caedb920610",
+      "date": "2025-05-28",
+      "subject": "Fix reconciliation of envvar with default, flag_value and type parameters for flag options",
+      "score": 51.25,
+      "flags": [
+        "bugfix"
+      ]
+    },
+    {
+      "sha": "762c97eef7c1",
+      "date": "2026-06-10",
+      "subject": "Fix double-bracketing of choices in synopsis",
+      "score": 50.84,
+      "flags": [
+        "bugfix"
+      ]
+    },
+    {
+      "sha": "0f71fe771cee",
+      "date": "2026-05-15",
+      "subject": "Fix dual-option arbitration to respect explicit defaults",
+      "score": 50.74,
+      "flags": [
+        "bugfix"
+      ]
+    },
+    {
+      "sha": "634549fc180a",
+      "date": "2025-08-21",
+      "subject": "Don't refactor variable names unnecessarily",
+      "score": 49.36,
+      "flags": [
+        "refactor"
+      ]
+    },
+    {
+      "sha": "437e1e3295c7",
+      "date": "2025-11-11",
+      "subject": "Temporarily provide a fake context to the callback to hide `UNSET` values as `None`",
+      "score": 49.35,
+      "flags": [
+        "bugfix"
+      ]
+    }
+  ],
+  "people": [
+    {
+      "identity": "Kevin Deldycke <04e51b6e388e>",
+      "first_touch": "2025-01-09T11:58:35-08:00",
+      "last_touch": "2026-06-10T17:26:48+04:00",
+      "commit_count": 49,
+      "weighted_importance": 1909.21,
+      "current_blame_lines": 600
+    },
+    {
+      "identity": "Andreas Backx <eb6140ed1520>",
+      "first_touch": "2024-11-03T20:38:31Z",
+      "last_touch": "2026-05-04T21:03:00+01:00",
+      "commit_count": 5,
+      "weighted_importance": 191.42,
+      "current_blame_lines": 48
+    },
+    {
+      "identity": "Stephen Rosen <69b37ea7cdd3>",
+      "first_touch": "2025-09-22T08:55:58-05:00",
+      "last_touch": "2025-11-19T15:06:11-06:00",
+      "commit_count": 4,
+      "weighted_importance": 173.01,
+      "current_blame_lines": 36
+    },
+    {
+      "identity": "David Lord <001d3a4e357b>",
+      "first_touch": "2025-05-10T14:38:12-07:00",
+      "last_touch": "2026-04-21T20:56:46-07:00",
+      "commit_count": 3,
+      "weighted_importance": 101.97,
+      "current_blame_lines": 11
+    },
+    {
+      "identity": "Yuri Shevtsov <93f63a068867>",
+      "first_touch": "2026-05-19T01:48:00Z",
+      "last_touch": "2026-05-19T19:43:26-04:00",
+      "commit_count": 2,
+      "weighted_importance": 80.63,
+      "current_blame_lines": 37
+    }
+  ],
+  "warnings": []
+}

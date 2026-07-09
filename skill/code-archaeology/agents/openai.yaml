@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Archaeology"
+  short_description: "从本地 git 历史生成可信的模块演化考古时间线报告"
+  default_prompt: "Use $code-archaeology to explain why a module evolved into its current shape from git history."

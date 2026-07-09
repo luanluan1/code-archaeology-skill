@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.tmp*/
+tmp/
+temp/
+
+# Large raw collector dumps are useful locally but noisy in the repository.
+examples/*-evidence.json
