@@ -25,6 +25,26 @@ No GitHub/GitLab API is required by default. No PRs, issues, author motives, or 
 
 When explicitly requested, the skill can add remote collaboration evidence, Python AST-level structure diffs, and an offline HTML timeline. These are evidence enrichments; Codex still needs to inspect important diffs before writing conclusions.
 
+## Feature Description
+
+`code-archaeology` turns a fuzzy code-history question into auditable evidence collection, important diff inspection, and an engineering report.
+
+| User Goal | Input Scope | What The Skill Does | Main Output |
+|---|---|---|---|
+| Explain why a module became its current shape | File, directory, glob, module name, or symbol | Resolves the target, collects relevant commits, and detects add/delete/rename/copy/move/revert/merge signals | Evidence-cited evolution report |
+| Find key commits and historical turning points | Full history, date range, or version range | Scores commits using churn, blame survivorship, lifecycle events, and intent keywords | Ranked commits, review priority, recommended `git show` commands |
+| Inspect GitHub/GitLab PR or issue context | Explicit `--remote-context auto` opt-in | Fetches linked PRs, issues, reviews, and recorded rationale with link method and confidence | `external_evidence` block |
+| Inspect AST-level structural change | Python `.py` / `.pyi` files with explicit `--ast-diff` | Compares imports, functions, classes, signatures, decorators, and body changes | Structured `semantic_diffs` |
+| Browse a visual timeline | Collector JSON | Renders an offline HTML page with no server or build step | `timeline.html` evidence index |
+
+Typical workflow:
+
+1. The user gives a target such as `src/auth`, `src/click/core.py`, or `login`.
+2. The collector writes a JSON evidence package with repository state, target resolution, commit ranking, path lineage, people maintenance signals, and warnings.
+3. Codex reads the important diffs recommended by the JSON instead of summarizing commit messages alone.
+4. When requested, the run adds remote collaboration evidence, Python AST diffs, or an offline HTML timeline.
+5. The final report only states conclusions supported by evidence; unsupported questions are marked unknown.
+
 ## What It Produces
 
 ```markdown
@@ -47,7 +67,7 @@ When explicitly requested, the skill can add remote collaboration evidence, Pyth
 
 The skill is designed for engineers taking over a code area, preparing a refactor, reviewing a risky module, or trying to understand why a file carries so much historical weight.
 
-## Capability Boundaries
+## Safety Boundaries
 
 - Local-first evidence by default: `log`, `show`, `blame`, rename/copy lineage, scoring, and recommended diffs.
 - Optional remote evidence: with `--remote-context auto`, fetch GitHub/GitLab PRs, issues, reviews, and recorded rationale.

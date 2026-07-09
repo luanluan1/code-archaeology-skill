@@ -25,6 +25,26 @@
 
 需要时可以显式开启远端协作证据、Python AST 级结构差异，以及离线 HTML 时间线。它们都是证据增强，不会替代 Codex 阅读关键 diff 后写出的判断。
 
+## 功能描述
+
+`code-archaeology` 把一次模糊的代码历史问题，拆成可审计的证据采集、关键 diff 阅读和工程报告生成。
+
+| 用户想做 | 输入范围 | Skill 会做什么 | 主要输出 |
+|---|---|---|---|
+| 解释一个模块为什么变成今天这样 | 文件、目录、glob、模块名、symbol | 解析目标、收集相关 commit、识别 add/delete/rename/copy/move/revert/merge 等历史信号 | 带证据编号的模块演化报告 |
+| 找关键 commit 和历史转折点 | 全历史、日期范围、版本范围 | 对 commit 做重要性评分，结合 churn、blame 存活度、生命周期事件和意图关键词排序 | 关键 commit 列表、阅读优先级、`git show` 推荐命令 |
+| 看 GitHub/GitLab PR 或 issue 背景 | 显式开启 `--remote-context auto` | 抓取关联 PR、issue、review、记录中的理由，并标注关联方式和置信度 | `external_evidence` 证据块 |
+| 看 AST 级结构变化 | Python `.py` / `.pyi` 文件，显式开启 `--ast-diff` | 比较 import、函数、类、签名、decorator、body 变化 | `semantic_diffs` 结构化结果 |
+| 浏览可视化时间线 | collector 生成的 JSON | 生成一个离线 HTML 页面，不依赖服务端或构建工具 | `timeline.html` 证据索引 |
+
+典型工作流：
+
+1. 用户给出目标，例如 `src/auth`、`src/click/core.py` 或 `login`。
+2. collector 先生成 JSON 证据包，包括仓库状态、目标解析、commit 排名、路径演化、人员维护信号和警告。
+3. Codex 按 JSON 推荐的命令阅读关键 diff，而不是只复述 commit message。
+4. 如果用户要求，额外补充远端协作证据、Python AST diff 或离线 HTML 时间线。
+5. 最终报告只写证据能支持的结论；证据不足的地方明确写成未知。
+
 ## 能输出什么
 
 ```markdown
@@ -47,7 +67,7 @@
 
 它适合接手旧模块、准备重构、评估高风险文件，或者解释“为什么这里这么复杂”。
 
-## 能力边界
+## 安全边界
 
 - 默认只读本地 git：`log`、`show`、`blame`、rename/copy lineage、评分和关键 diff 推荐。
 - 可选远端证据：用户明确要求后，用 `--remote-context auto` 抓取 GitHub/GitLab PR、issue、review 和记录中的理由。
