@@ -1,7 +1,11 @@
 <h1 align="center">Code Archaeology Skill</h1>
 
 <p align="center">
-  Turn git history into an evidence-backed engineering timeline.
+  🌐 <strong>中文</strong> · <a href="./README.en.md">English</a>
+</p>
+
+<p align="center">
+  把 git 历史变成有证据链的工程演化时间线。
 </p>
 
 <p align="center">
@@ -11,15 +15,15 @@
   <img alt="No network required at runtime" src="https://img.shields.io/badge/runtime-local_git_only-7c3aed?style=flat-square">
 </p>
 
-`code-archaeology` is a Codex skill for answering questions like:
+`code-archaeology` 是一个 Codex skill，用来回答这类问题：
 
-> "Why did this module become this shape?"
+> “这个模块为什么变成今天这样？”
 
-It collects local git evidence first, asks Codex to inspect the important diffs, then produces a report with key commits, key people, turning points, legacy constraints, and unknowns.
+它会先从本地 git 历史里收集证据，再让 Codex 阅读关键 diff，最后产出包含关键 commit、关键人、历史转折点、遗留约束和未知项的工程报告。
 
-No GitHub API is required at runtime. No PR or issue history is invented. If the local git history cannot prove something, the report must say so.
+运行时不依赖 GitHub API，也不会编造 PR、issue 或作者动机。如果本地 git 历史证明不了，报告必须明确写成未知。
 
-## What It Produces
+## 能输出什么
 
 ```markdown
 # Code Archaeology: src/auth
@@ -39,25 +43,25 @@ No GitHub API is required at runtime. No PR or issue history is invented. If the
 ## Unknowns
 ```
 
-The skill is designed for engineers taking over a code area, preparing a refactor, reviewing a risky module, or trying to understand why a file carries so much historical weight.
+它适合接手旧模块、准备重构、评估高风险文件，或者解释“为什么这里这么复杂”。
 
-## Quickstart
+## 快速开始
 
-Clone the repository:
+克隆仓库：
 
 ```bash
 git clone https://github.com/luanluan1/code-archaeology-skill.git
 cd code-archaeology-skill
 ```
 
-Install the skill into Codex:
+安装到 Codex：
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
 cp -R skill/code-archaeology "${CODEX_HOME:-$HOME/.codex}/skills/"
 ```
 
-PowerShell:
+PowerShell：
 
 ```powershell
 $skills = if ($env:CODEX_HOME) { Join-Path $env:CODEX_HOME "skills" } else { Join-Path $HOME ".codex\skills" }
@@ -65,60 +69,60 @@ New-Item -ItemType Directory -Force $skills | Out-Null
 Copy-Item -Recurse -Force ".\skill\code-archaeology" $skills
 ```
 
-Restart Codex so it reloads skill metadata.
+重启 Codex，让它重新加载 skill 元数据。
 
-## Use It
+## 如何使用
 
-Ask Codex naturally:
+自然地问 Codex：
 
 ```text
-Use code-archaeology to explain why src/auth became this shape.
+用 code-archaeology 分析 src/auth 为什么变成今天这样。
 ```
 
-Or point it at a range:
+也可以指定版本范围：
 
 ```text
 用 code-archaeology 分析 src/payments 从 v1.8.0 到现在的关键转折点和关键人。
 ```
 
-Under the hood, the skill runs:
+底层会先运行类似命令：
 
 ```bash
 python skill/code-archaeology/scripts/collect_git_history.py --repo . --max-commits 300 --top-k 20 src/auth
 ```
 
-Then Codex reads the recommended `git show` commands before writing the report.
+然后 Codex 根据脚本推荐的 `git show` 命令阅读关键 diff，再写报告。
 
-## Why This Is Different
+## 为什么不一样
 
-Most "git history summaries" become commit-message fan fiction.
+很多“git 历史总结”最后都会变成 commit message 故事会。
 
-`code-archaeology` prevents that with a hard split:
+`code-archaeology` 用三层结构避免这个问题：
 
-| Layer | Responsibility |
+| 层 | 责任 |
 |---|---|
-| Collector script | Deterministic evidence: log, blame, rename lineage, scoring, people stats |
-| Skill workflow | Investigation discipline: what to inspect and when to stop |
-| Codex report | Human-readable timeline with evidence IDs and uncertainty |
+| Collector script | 确定性证据：log、blame、rename lineage、评分、人员统计 |
+| Skill workflow | 调查纪律：什么时候采集、什么时候读 diff、什么时候标未知 |
+| Codex report | 带证据编号和不确定性标注的人类可读报告 |
 
-Every non-trivial claim in the final report must cite evidence or be marked as inference/unknown.
+最终报告里的每个非平凡结论都必须引用证据，或者明确标为推断/未知。
 
-## Built-In Evidence Collection
+## 内置证据采集
 
-The collector handles:
+collector 支持：
 
-- file, directory, glob, module-name, and symbol targets
-- `git log --follow` for file history
-- rename, copy, move, add, delete, and revert signals
-- directory history via `--name-status -M -C`
-- current survivorship via `git blame -w -M -C`
-- merge commit detection
-- shallow clone warnings
-- generated/vendor/lockfile and formatting noise penalties
-- author activity, weighted importance, and current blame lines
-- review commands for the commits Codex should inspect
+- 文件、目录、glob、模块名、symbol 目标
+- 文件历史的 `git log --follow`
+- rename、copy、move、add、delete、revert 信号
+- 目录历史的 `--name-status -M -C`
+- `git blame -w -M -C` 当前存活度
+- merge commit 检测
+- shallow clone 警告
+- generated/vendor/lockfile 和格式化噪音降权
+- 作者活跃度、加权重要性、当前 blame 行数
+- 给 Codex 阅读的 `git show` 推荐命令
 
-Example:
+示例：
 
 ```bash
 python skill/code-archaeology/scripts/collect_git_history.py \
@@ -128,19 +132,21 @@ python skill/code-archaeology/scripts/collect_git_history.py \
   src/click/core.py
 ```
 
-## Real Smoke Test
+## 真实 Smoke Test
 
-This repository was smoke-tested against the real public repository `pallets/click`:
+这个仓库已经用真实公开项目 `pallets/click` 跑过 smoke test：
 
-- target: `src/click/core.py`
-- collected commits: `80`
-- history completeness: `true`
-- warnings: none
-- top evidence included bugfix, revert, and refactor signals
+- 目标：`src/click/core.py`
+- 收集 commit：`80`
+- 历史完整性：`true`
+- 警告：无
+- top evidence 包含 bugfix、revert、refactor 信号
 
-See [examples/click-core-summary.json](examples/click-core-summary.json) and [examples/sample-report.md](examples/sample-report.md).
+见 [examples/click-core-summary.json](examples/click-core-summary.json) 和 [examples/sample-report.md](examples/sample-report.md)。
 
-## Repository Layout
+后续又用本项目自身跑目录级真实测试，发现并修复了 Windows UTF-8 解码问题，回归测试已加入 `tests/test_collect_git_history.py`。
+
+## 仓库结构
 
 ```text
 .
@@ -159,41 +165,41 @@ See [examples/click-core-summary.json](examples/click-core-summary.json) and [ex
 └── examples/
 ```
 
-The skill folder stays lean. Human-facing project docs live at the repository root.
+skill 包保持精简；面向人的说明文档放在仓库根目录。
 
-## Development
+## 开发验证
 
-Run tests:
+运行测试：
 
 ```bash
 python tests/test_collect_git_history.py
 ```
 
-Validate the skill:
+校验 skill：
 
 ```bash
 PYTHONUTF8=1 python ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py skill/code-archaeology
 ```
 
-PowerShell:
+PowerShell：
 
 ```powershell
 $env:PYTHONUTF8 = "1"
 python "$HOME\.codex\skills\.system\skill-creator\scripts\quick_validate.py" "skill\code-archaeology"
 ```
 
-## Non-Goals
+## 非目标
 
-MVP intentionally does not do:
+MVP 暂不做：
 
-- GitHub/GitLab PR or issue mining
-- automated organization politics
-- owner performance analysis
-- AST-level semantic diff
-- visual timeline UI
-- automatic refactor advice
+- GitHub/GitLab PR 或 issue 挖掘
+- 组织政治或作者动机推断
+- 基于提交数的 owner 绩效判断
+- AST 级语义 diff
+- 可视化时间线 UI
+- 自动重构建议
 
-The first job is narrower and more valuable: make local git history explainable, auditable, and useful before a human touches risky code.
+第一版只做一件更窄也更有价值的事：让本地 git 历史变得可解释、可审计，并能帮助人类安全修改高风险代码。
 
 ## License
 
