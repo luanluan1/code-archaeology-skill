@@ -47,23 +47,13 @@
 
 ## 能输出什么
 
-```markdown
-# Code Archaeology: src/auth
+- 工程摘要：当前职责、主要演化路径、最大维护约束。
+- 演化时间线：按阶段组织关键 commit、主题、变化和影响。
+- 历史转折点：创建、迁移、重构、回滚、安全/性能修复等关键变化。
+- 关键人/维护信号：作者、评审、当前 blame 存活度和 caveat。
+- 证据索引与未知项：每个非平凡结论都引用证据，不足处明确标未知。
 
-## Engineer Summary
-- Current responsibility: ...
-- Main evolution: ...
-- Biggest maintenance constraint: ...
-
-## Evolution Timeline
-| Phase | Date/Commits | Theme | What Changed | Why It Matters | Evidence |
-
-## Turning Points
-## Key People
-## Legacy Layers And Constraints
-## Evidence Index
-## Unknowns
-```
+查看完整报告样例：[examples/sample-report.md](examples/sample-report.md)。
 
 它适合接手旧模块、准备重构、评估高风险文件，或者解释“为什么这里这么复杂”。
 
@@ -129,9 +119,7 @@ Copy-Item -Recurse -Force ".\skill\code-archaeology" $skills
 
 </details>
 
-### 方式三：作为参考资料使用
-
-如果你的 runtime 暂不支持自动加载 Agent Skills，也可以直接把 [SKILL.md](skill/code-archaeology/SKILL.md) 的内容粘贴进对话。它本质上是一份带 YAML frontmatter 的 Markdown 工作流文档。
+如果你的 runtime 暂不支持自动加载 Agent Skills，也可以直接阅读 [SKILL.md](skill/code-archaeology/SKILL.md) 作为参考工作流。
 
 ## 如何使用
 
@@ -169,24 +157,14 @@ python skill/code-archaeology/scripts/collect_git_history.py --repo . --max-comm
 
 最终报告里的每个非平凡结论都必须引用证据，或者明确标为推断/未知。
 
-## 内置证据采集
+## Collector 能力
 
-collector 支持：
+collector 是一个确定性证据采集脚本，负责把 git 历史整理成 Codex 可审计的 JSON：
 
-- 文件、目录、glob、模块名、symbol 目标
-- 文件历史的 `git log --follow`
-- rename、copy、move、add、delete、revert 信号
-- 目录历史的 `--name-status -M -C`
-- `git blame -w -M -C` 当前存活度
-- merge commit 检测
-- shallow clone 警告
-- generated/vendor/lockfile 和格式化噪音降权
-- 作者活跃度、加权重要性、当前 blame 行数
-- 记录中的 issue/PR 引用和显式理由摘取
-- 可选 GitHub/GitLab PR、issue、review 证据补充
-- 可选 Python AST 符号级 diff
-- 可选离线 HTML 时间线渲染
-- 给 Codex 阅读的 `git show` 推荐命令
+- 目标解析：文件、目录、glob、模块名、symbol。
+- 历史信号：`git log --follow`、rename/copy/move/add/delete/revert/merge、shallow clone 警告。
+- 维护信号：当前 blame 存活度、作者活跃度、加权重要性、关键 diff 阅读命令。
+- 可选增强：GitHub/GitLab PR、issue、review，Python AST 符号 diff，离线 HTML 时间线。
 
 示例：
 
@@ -223,64 +201,15 @@ python skill/code-archaeology/scripts/render_timeline_html.py \
 
 远端证据默认关闭。私有仓库的 PR/issue/review 可能包含内部路径、用户名或业务信息，分享 JSON/HTML 前请先检查。
 
-## 真实 Smoke Test
+## 真实验证
 
-这个仓库已经用真实公开项目 `pallets/click` 跑过 smoke test：
+这个仓库已经做过本地和公开仓库 smoke test：
 
-- 目标：`src/click/core.py`
-- 收集 commit：`80`
-- 历史完整性：`true`
-- 警告：无
-- top evidence 包含 bugfix、revert、refactor 信号
-- 本项目自身已用 `--ast-diff` 和 HTML renderer 做过真实回归
+- `pallets/click` 的 `src/click/core.py`：采集 `80` 个真实 commit，生成样例报告。
+- 本机安装版 skill：对本仓库自身跑通 collector、Python AST diff 和 HTML renderer。
+- GitHub 远端联通：对 `pallets/click` 抓到 `9` 个真实 PR artifact，且 warning 为空。
 
-见 [examples/click-core-summary.json](examples/click-core-summary.json) 和 [examples/sample-report.md](examples/sample-report.md)。
-
-后续又用本项目自身跑目录级真实测试，发现并修复了 Windows UTF-8 解码问题，回归测试已加入 `tests/test_collect_git_history.py`。
-
-本次功能扩展还做了两组本机安装版真实联通测试。
-
-第一组直接调用安装到 `~/.codex/skills/code-archaeology` 的 skill，对本仓库自身做采集、AST 分析、远端探测和 HTML 渲染：
-
-```bash
-python ~/.codex/skills/code-archaeology/scripts/collect_git_history.py \
-  --repo . \
-  --max-commits 30 \
-  --top-k 10 \
-  --ast-diff \
-  --remote-context auto \
-  --remote-limit 5 \
-  --output .tmp-real/installed-skill-evidence.json \
-  skill/code-archaeology/scripts/collect_git_history.py
-
-python ~/.codex/skills/code-archaeology/scripts/render_timeline_html.py \
-  .tmp-real/installed-skill-evidence.json \
-  --output .tmp-real/installed-skill-timeline.html
-```
-
-真实结果：采集到 `3` 个相关 commit，Python AST 分析 `3` 个文件版本成功，识别出 `function_body_changed`、`import_changed`、`semantic_change`、`signature_changed`、`symbol_added`；远端识别为 GitHub，本仓库这些提交没有关联 PR artifact，warning 为空；HTML 时间线成功生成。
-
-第二组用真实公开仓库 `pallets/click` 验证 GitHub PR 证据抓取：
-
-```bash
-git clone --depth=200 https://github.com/pallets/click.git .tmp-real/pallets-click
-
-python ~/.codex/skills/code-archaeology/scripts/collect_git_history.py \
-  --repo .tmp-real/pallets-click \
-  --max-commits 12 \
-  --top-k 6 \
-  --ast-diff \
-  --remote-context auto \
-  --remote-limit 6 \
-  --output .tmp-real/click-installed-evidence.json \
-  src/click/core.py
-
-python ~/.codex/skills/code-archaeology/scripts/render_timeline_html.py \
-  .tmp-real/click-installed-evidence.json \
-  --output .tmp-real/click-installed-timeline.html
-```
-
-真实结果：采集到 `12` 个相关 commit，Python AST 分析 `12` 个文件版本成功，GitHub API 返回 `9` 个 PR artifact，示例包括 `GH-PR-3404`、`GH-PR-3578`、`GH-PR-3509`，远端 warning 为空，HTML 时间线成功生成。该测试为了速度使用浅克隆，所以 `history_complete=false`，报告中不能据此声称“最早/首次”。
+详情见 [docs/verification.md](docs/verification.md)，示例见 [examples/click-core-summary.json](examples/click-core-summary.json) 和 [examples/sample-report.md](examples/sample-report.md)。
 
 ## 仓库结构
 
@@ -301,7 +230,10 @@ python ~/.codex/skills/code-archaeology/scripts/render_timeline_html.py \
 ├── tests/
 │   ├── test_collect_git_history.py
 │   └── test_render_timeline_html.py
-├── docs/design.md
+├── docs/
+│   ├── design.md
+│   ├── verification.md
+│   └── verification.en.md
 └── examples/
 ```
 

@@ -47,23 +47,13 @@ Typical workflow:
 
 ## What It Produces
 
-```markdown
-# Code Archaeology: src/auth
+- Engineer summary: current responsibility, main evolution, and biggest maintenance constraint.
+- Evolution timeline: phases with key commits, themes, changes, and impact.
+- Turning points: creation, migration, refactor, revert, security, and performance moments.
+- Key people / maintenance signals: authors, reviewers, current blame survivorship, and caveats.
+- Evidence index and unknowns: every non-trivial conclusion is cited; missing evidence stays unknown.
 
-## Engineer Summary
-- Current responsibility: ...
-- Main evolution: ...
-- Biggest maintenance constraint: ...
-
-## Evolution Timeline
-| Phase | Date/Commits | Theme | What Changed | Why It Matters | Evidence |
-
-## Turning Points
-## Key People
-## Legacy Layers And Constraints
-## Evidence Index
-## Unknowns
-```
+See a complete report example: [examples/sample-report.md](examples/sample-report.md).
 
 The skill is designed for engineers taking over a code area, preparing a refactor, reviewing a risky module, or trying to understand why a file carries so much historical weight.
 
@@ -129,9 +119,7 @@ Restart Codex so it reloads skill metadata.
 
 </details>
 
-### Method 3: Use As Reference Material
-
-If your runtime does not support automatic Agent Skills loading yet, paste the contents of [SKILL.md](skill/code-archaeology/SKILL.md) into the conversation. It is a Markdown workflow document with YAML frontmatter.
+If your runtime does not support automatic Agent Skills loading yet, read [SKILL.md](skill/code-archaeology/SKILL.md) as a reference workflow.
 
 ## Use It
 
@@ -169,24 +157,14 @@ Most "git history summaries" become commit-message fan fiction.
 
 Every non-trivial claim in the final report must cite evidence or be marked as inference/unknown.
 
-## Built-In Evidence Collection
+## Collector Capabilities
 
-The collector handles:
+The collector is a deterministic evidence script that turns git history into auditable JSON for Codex:
 
-- file, directory, glob, module-name, and symbol targets
-- `git log --follow` for file history
-- rename, copy, move, add, delete, and revert signals
-- directory history via `--name-status -M -C`
-- current survivorship via `git blame -w -M -C`
-- merge commit detection
-- shallow clone warnings
-- generated/vendor/lockfile and formatting noise penalties
-- author activity, weighted importance, and current blame lines
-- recorded issue/PR references and explicit rationale extraction
-- optional GitHub/GitLab PR, issue, and review evidence
-- optional Python AST symbol diffs
-- optional offline HTML timeline rendering
-- review commands for the commits Codex should inspect
+- Target resolution: file, directory, glob, module name, or symbol.
+- History signals: `git log --follow`, rename/copy/move/add/delete/revert/merge, and shallow clone warnings.
+- Maintenance signals: current blame survivorship, author activity, weighted importance, and recommended diff commands.
+- Optional enrichments: GitHub/GitLab PRs, issues, reviews, Python AST symbol diffs, and offline HTML timelines.
 
 Example:
 
@@ -223,62 +201,15 @@ python skill/code-archaeology/scripts/render_timeline_html.py \
 
 Remote evidence is disabled by default. Private repository PRs, issues, and reviews may contain internal paths, usernames, or business context; inspect JSON/HTML before sharing.
 
-## Real Smoke Test
+## Verification
 
-This repository was smoke-tested against the real public repository `pallets/click`:
+This repository has been smoke-tested against local and public repositories:
 
-- target: `src/click/core.py`
-- collected commits: `80`
-- history completeness: `true`
-- warnings: none
-- top evidence included bugfix, revert, and refactor signals
-- this repository has also been regression-tested with `--ast-diff` and the HTML renderer
+- `pallets/click` `src/click/core.py`: collected `80` real commits and produced the sample report.
+- Installed local skill: ran collector, Python AST diff, and HTML renderer against this repository.
+- GitHub remote connection: fetched `9` real PR artifacts from `pallets/click` with no warnings.
 
-See [examples/click-core-summary.json](examples/click-core-summary.json) and [examples/sample-report.md](examples/sample-report.md).
-
-This feature expansion was also tested with two local installed-skill smoke tests.
-
-The first test called the skill installed under `~/.codex/skills/code-archaeology` and ran collection, AST analysis, remote detection, and HTML rendering against this repository:
-
-```bash
-python ~/.codex/skills/code-archaeology/scripts/collect_git_history.py \
-  --repo . \
-  --max-commits 30 \
-  --top-k 10 \
-  --ast-diff \
-  --remote-context auto \
-  --remote-limit 5 \
-  --output .tmp-real/installed-skill-evidence.json \
-  skill/code-archaeology/scripts/collect_git_history.py
-
-python ~/.codex/skills/code-archaeology/scripts/render_timeline_html.py \
-  .tmp-real/installed-skill-evidence.json \
-  --output .tmp-real/installed-skill-timeline.html
-```
-
-Real result: `3` related commits collected, `3` Python AST file versions analyzed successfully, semantic flags included `function_body_changed`, `import_changed`, `semantic_change`, `signature_changed`, and `symbol_added`; the remote was recognized as GitHub, these commits had no linked PR artifacts, warnings were empty, and the HTML timeline was generated successfully.
-
-The second test used the real public repository `pallets/click` to verify GitHub PR evidence fetching:
-
-```bash
-git clone --depth=200 https://github.com/pallets/click.git .tmp-real/pallets-click
-
-python ~/.codex/skills/code-archaeology/scripts/collect_git_history.py \
-  --repo .tmp-real/pallets-click \
-  --max-commits 12 \
-  --top-k 6 \
-  --ast-diff \
-  --remote-context auto \
-  --remote-limit 6 \
-  --output .tmp-real/click-installed-evidence.json \
-  src/click/core.py
-
-python ~/.codex/skills/code-archaeology/scripts/render_timeline_html.py \
-  .tmp-real/click-installed-evidence.json \
-  --output .tmp-real/click-installed-timeline.html
-```
-
-Real result: `12` related commits collected, `12` Python AST file versions analyzed successfully, the GitHub API returned `9` PR artifacts, including `GH-PR-3404`, `GH-PR-3578`, and `GH-PR-3509`; remote warnings were empty, and the HTML timeline was generated successfully. This test used a shallow clone for speed, so `history_complete=false` and reports must not claim "earliest" or "first-ever" from it.
+Details: [docs/verification.en.md](docs/verification.en.md). Examples: [examples/click-core-summary.json](examples/click-core-summary.json) and [examples/sample-report.md](examples/sample-report.md).
 
 ## Repository Layout
 
@@ -299,7 +230,10 @@ Real result: `12` related commits collected, `12` Python AST file versions analy
 ├── tests/
 │   ├── test_collect_git_history.py
 │   └── test_render_timeline_html.py
-├── docs/design.md
+├── docs/
+│   ├── design.md
+│   ├── verification.md
+│   └── verification.en.md
 └── examples/
 ```
 
