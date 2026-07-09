@@ -45,7 +45,30 @@ No GitHub API is required at runtime. No PR or issue history is invented. If the
 
 The skill is designed for engineers taking over a code area, preparing a refactor, reviewing a risky module, or trying to understand why a file carries so much historical weight.
 
-## Quickstart
+## Install
+
+`code-archaeology` follows the [Agent Skills](https://agentskills.io/) structure and can run in skills-compatible AI agent runtimes.
+
+### Method 1: One-Line Agent Install (Recommended)
+
+Open the agent runtime you use, such as Codex, Claude Code, Cursor, OpenCode, or Gemini CLI, and tell it:
+
+```text
+Install this skill: https://github.com/luanluan1/code-archaeology-skill
+```
+
+If your runtime supports the universal Skills CLI, you can also run:
+
+```bash
+npx skills add luanluan1/code-archaeology-skill
+```
+
+When needed, add a runtime flag as prompted by the CLI, such as `-a codex`, `-a claude-code`, or `-a cursor`.
+
+### Method 2: Manual Install
+
+<details>
+<summary>Expand for Codex manual install steps</summary>
 
 Clone the repository:
 
@@ -54,7 +77,7 @@ git clone https://github.com/luanluan1/code-archaeology-skill.git
 cd code-archaeology-skill
 ```
 
-Install the skill into Codex:
+Copy the skill into the Codex skills directory:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
@@ -70,6 +93,12 @@ Copy-Item -Recurse -Force ".\skill\code-archaeology" $skills
 ```
 
 Restart Codex so it reloads skill metadata.
+
+</details>
+
+### Method 3: Use As Reference Material
+
+If your runtime does not support automatic Agent Skills loading yet, paste the contents of [SKILL.md](skill/code-archaeology/SKILL.md) into the conversation. It is a Markdown workflow document with YAML frontmatter.
 
 ## Use It
 

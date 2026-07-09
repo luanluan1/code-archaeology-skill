@@ -45,7 +45,30 @@
 
 它适合接手旧模块、准备重构、评估高风险文件，或者解释“为什么这里这么复杂”。
 
-## 快速开始
+## 安装
+
+`code-archaeology` 遵循 [Agent Skills](https://agentskills.io/) 结构，可在 skills-compatible 的 AI agent runtime 中使用。
+
+### 方式一：一句话安装（推荐，跨 runtime）
+
+打开你正在使用的 agent，例如 Codex、Claude Code、Cursor、OpenCode、Gemini CLI 等，告诉它：
+
+```text
+帮我安装这个 skill: https://github.com/luanluan1/code-archaeology-skill
+```
+
+如果你的 runtime 支持通用 Skills CLI，也可以直接运行：
+
+```bash
+npx skills add luanluan1/code-archaeology-skill
+```
+
+需要指定 runtime 时，可按 CLI 提示追加参数，例如 `-a codex`、`-a claude-code`、`-a cursor`。
+
+### 方式二：手动安装
+
+<details>
+<summary>展开查看 Codex 手动安装步骤</summary>
 
 克隆仓库：
 
@@ -54,7 +77,7 @@ git clone https://github.com/luanluan1/code-archaeology-skill.git
 cd code-archaeology-skill
 ```
 
-安装到 Codex：
+复制 skill 到 Codex skills 目录：
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
@@ -70,6 +93,12 @@ Copy-Item -Recurse -Force ".\skill\code-archaeology" $skills
 ```
 
 重启 Codex，让它重新加载 skill 元数据。
+
+</details>
+
+### 方式三：作为参考资料使用
+
+如果你的 runtime 暂不支持自动加载 Agent Skills，也可以直接把 [SKILL.md](skill/code-archaeology/SKILL.md) 的内容粘贴进对话。它本质上是一份带 YAML frontmatter 的 Markdown 工作流文档。
 
 ## 如何使用
 
