@@ -12,7 +12,7 @@
   <a href="skill/code-archaeology/SKILL.md"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex-Skill-111827?style=flat-square"></a>
   <a href="tests/test_collect_git_history.py"><img alt="Tests" src="https://img.shields.io/badge/tests-unittest-2563eb?style=flat-square"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a?style=flat-square"></a>
-  <img alt="No network required at runtime" src="https://img.shields.io/badge/runtime-local_git_only-7c3aed?style=flat-square">
+  <img alt="Local first, remote opt-in" src="https://img.shields.io/badge/runtime-local_first_remote_opt--in-7c3aed?style=flat-square">
 </p>
 
 `code-archaeology` is a Codex skill for answering questions like:
@@ -21,9 +21,9 @@
 
 It collects local git evidence first, asks Codex to inspect the important diffs, then produces a report with key commits, key people, turning points, legacy constraints, and unknowns.
 
-No GitHub API is required at runtime. No PR or issue history is invented. If the local git history cannot prove something, the report must say so.
+No GitHub/GitLab API is required by default. No PRs, issues, author motives, or team stories are invented. If evidence cannot prove something, the report must say so.
 
-The current version focuses on local git history; PRs, issues, and remote platform data can be added later.
+When explicitly requested, the skill can add remote collaboration evidence, Python AST-level structure diffs, and an offline HTML timeline. These are evidence enrichments; Codex still needs to inspect important diffs before writing conclusions.
 
 ## What It Produces
 
@@ -46,6 +46,15 @@ The current version focuses on local git history; PRs, issues, and remote platfo
 ```
 
 The skill is designed for engineers taking over a code area, preparing a refactor, reviewing a risky module, or trying to understand why a file carries so much historical weight.
+
+## Capability Boundaries
+
+- Local-first evidence by default: `log`, `show`, `blame`, rename/copy lineage, scoring, and recommended diffs.
+- Optional remote evidence: with `--remote-context auto`, fetch GitHub/GitLab PRs, issues, reviews, and recorded rationale.
+- Optional AST diff: with `--ast-diff`, analyze Python `.py`/`.pyi` imports, functions, classes, signatures, and body changes.
+- Optional visualization: render collector JSON into an offline HTML timeline for phases, commits, flags, people signals, and warnings.
+
+It does not infer hidden motivation, organization politics, blame, or individual performance. Commit counts, review counts, and blame lines are maintenance signals only.
 
 ## Install
 
@@ -153,6 +162,10 @@ The collector handles:
 - shallow clone warnings
 - generated/vendor/lockfile and formatting noise penalties
 - author activity, weighted importance, and current blame lines
+- recorded issue/PR references and explicit rationale extraction
+- optional GitHub/GitLab PR, issue, and review evidence
+- optional Python AST symbol diffs
+- optional offline HTML timeline rendering
 - review commands for the commits Codex should inspect
 
 Example:
@@ -165,6 +178,31 @@ python skill/code-archaeology/scripts/collect_git_history.py \
   src/click/core.py
 ```
 
+Optional enrichments:
+
+```bash
+# Python AST symbol diff
+python skill/code-archaeology/scripts/collect_git_history.py \
+  --repo /path/to/repo \
+  --ast-diff \
+  --output archaeology.json \
+  src/auth.py
+
+# Explicit GitHub/GitLab PR, issue, and review evidence
+python skill/code-archaeology/scripts/collect_git_history.py \
+  --repo /path/to/repo \
+  --remote-context auto \
+  --output archaeology.json \
+  src/auth
+
+# Render an offline HTML timeline
+python skill/code-archaeology/scripts/render_timeline_html.py \
+  archaeology.json \
+  --output timeline.html
+```
+
+Remote evidence is disabled by default. Private repository PRs, issues, and reviews may contain internal paths, usernames, or business context; inspect JSON/HTML before sharing.
+
 ## Real Smoke Test
 
 This repository was smoke-tested against the real public repository `pallets/click`:
@@ -174,8 +212,29 @@ This repository was smoke-tested against the real public repository `pallets/cli
 - history completeness: `true`
 - warnings: none
 - top evidence included bugfix, revert, and refactor signals
+- this repository has also been regression-tested with `--ast-diff` and the HTML renderer
 
 See [examples/click-core-summary.json](examples/click-core-summary.json) and [examples/sample-report.md](examples/sample-report.md).
+
+This feature expansion was also tested against this repository itself:
+
+```bash
+python skill/code-archaeology/scripts/collect_git_history.py \
+  --repo . \
+  --max-commits 25 \
+  --top-k 8 \
+  --ast-diff \
+  --remote-context auto \
+  --remote-limit 3 \
+  --output .tmp-real/self-evidence.json \
+  skill/code-archaeology/scripts/collect_git_history.py
+
+python skill/code-archaeology/scripts/render_timeline_html.py \
+  .tmp-real/self-evidence.json \
+  --output .tmp-real/self-timeline.html
+```
+
+Real result: `2` related commits collected, `2` Python AST file versions analyzed successfully, semantic flags included `import_changed`, `symbol_added`, `signature_changed`, and `function_body_changed`; the remote was recognized as GitHub, these commits had no linked PR artifacts, warnings were empty, and the HTML timeline was generated successfully.
 
 ## Repository Layout
 
@@ -190,8 +249,12 @@ See [examples/click-core-summary.json](examples/click-core-summary.json) and [ex
 │       │   ├── report-template.md
 │       │   ├── scoring.md
 │       │   └── workflow.md
-│       └── scripts/collect_git_history.py
-├── tests/test_collect_git_history.py
+│       └── scripts/
+│           ├── collect_git_history.py
+│           └── render_timeline_html.py
+├── tests/
+│   ├── test_collect_git_history.py
+│   └── test_render_timeline_html.py
 ├── docs/design.md
 └── examples/
 ```
@@ -204,6 +267,7 @@ Run tests:
 
 ```bash
 python tests/test_collect_git_history.py
+python tests/test_render_timeline_html.py
 ```
 
 Validate the skill:

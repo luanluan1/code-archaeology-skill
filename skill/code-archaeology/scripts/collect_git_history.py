@@ -9,24 +9,34 @@ recommended diffs and write evidence-backed conclusions.
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
 import hashlib
+import io
 import json
 import math
 import os
 import re
 import subprocess
 import sys
+import tokenize
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = "0.1"
+SCHEMA_VERSION = "0.2"
 FIELD_SEP = "\x1f"
 SHA_RE = re.compile(r"^[0-9a-f]{40}(?:\s|$)")
+AST_DIFF_SCHEMA_VERSION = "ast-diff.0.1"
+REMOTE_CONTEXT_SCHEMA_VERSION = "remote-context.0.1"
+DEFAULT_AST_MAX_FILES = 5
+DEFAULT_AST_MAX_BLOB_BYTES = 200_000
 GENERATED_PARTS = {
     "dist",
     "build",
@@ -69,6 +79,21 @@ class GitRunner:
         )
         if check and result.returncode != 0:
             raise GitError(result.stderr.strip() or result.stdout.strip() or "git command failed")
+        return result
+
+    def git_bytes(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+        command = ["git", *args]
+        self.commands_run.append(format_command(command))
+        result = subprocess.run(
+            command,
+            cwd=self.repo,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if check and result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace").strip()
+            stdout = result.stdout.decode("utf-8", errors="replace").strip()
+            raise GitError(stderr or stdout or "git command failed")
         return result
 
 
@@ -410,6 +435,94 @@ def first_non_subject_lines(body: str, subject: str) -> str:
     return "\n".join(lines[:5])
 
 
+ISSUE_REF_RE = re.compile(r"(?<![\w/])(?:(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+))?#(?P<number>\d+)\b")
+REMOTE_ARTIFACT_URL_RE = re.compile(
+    r"https?://(?P<host>[^/\s]+)/(?P<slug>[^/\s]+/[^/\s]+)/(?P<kind>issues|pull|pulls|merge_requests)/(?P<number>\d+)"
+)
+RATIONALE_RE = re.compile(
+    r"(?i)\b(reason|rationale|because|so that|why|motivation)\b|因为|由于|以便|为了|原因"
+)
+
+
+def build_recorded_context(commit: dict[str, Any]) -> dict[str, Any]:
+    text = "\n".join(part for part in [commit.get("subject"), commit.get("body_excerpt")] if part)
+    return {
+        "issue_references": extract_issue_references(text),
+        "explicit_rationales": extract_explicit_rationales(text),
+        "caveat": "These are recorded references and stated reasons only; they are not hidden motivation or causality proof.",
+    }
+
+
+def extract_issue_references(text: str) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str | None]] = set()
+
+    for match in REMOTE_ARTIFACT_URL_RE.finditer(text or ""):
+        kind = match.group("kind")
+        normalized_kind = "pull_request" if kind in {"pull", "pulls", "merge_requests"} else "issue"
+        raw = match.group(0)
+        key = (match.group("number"), normalized_kind, match.group("slug"))
+        if key in seen:
+            continue
+        refs.append(
+            {
+                "raw": raw,
+                "number": match.group("number"),
+                "kind": normalized_kind,
+                "repository": match.group("slug"),
+                "link_method": "explicit_url",
+                "confidence": 0.9,
+            }
+        )
+        seen.add(key)
+
+    for match in ISSUE_REF_RE.finditer(text or ""):
+        raw = match.group(0)
+        number = match.group("number")
+        repository = match.group("repo")
+        key = (number, "issue_or_pr", repository)
+        if key in seen:
+            continue
+        prefix = text[max(0, match.start() - 24) : match.start()].lower()
+        confidence = 0.8 if re.search(r"\b(fix(?:es|ed)?|close[sd]?|resolve[sd]?|ref(?:s)?|see)\s*$", prefix) else 0.6
+        refs.append(
+            {
+                "raw": raw,
+                "number": number,
+                "kind": "issue_or_pr",
+                "repository": repository,
+                "link_method": "commit_text_reference",
+                "confidence": confidence,
+            }
+        )
+        seen.add(key)
+    return refs
+
+
+def extract_explicit_rationales(text: str) -> list[dict[str, Any]]:
+    rationales: list[dict[str, Any]] = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or not RATIONALE_RE.search(line):
+            continue
+        rationales.append(
+            {
+                "text": truncate_text(line, 240),
+                "statement_type": "stated_rationale",
+                "source": "commit_text",
+                "caveat": "This is what the record says, not a private motive inference.",
+            }
+        )
+    return rationales[:5]
+
+
+def truncate_text(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
 def parse_name_status(output: str) -> list[dict[str, Any]]:
     changes: list[dict[str, Any]] = []
     for line in output.splitlines():
@@ -520,6 +633,321 @@ def path_matches_any(path: str, pathspecs: list[str]) -> bool:
         if path == clean or path.startswith(clean + "/"):
             return True
     return False
+
+
+def detect_semantic_language(path: str | None) -> str:
+    if not path:
+        return "unknown"
+    suffix = Path(path).suffix.lower()
+    if suffix in {".py", ".pyi"}:
+        return "python"
+    return "unsupported"
+
+
+def collect_semantic_diffs(
+    runner: GitRunner,
+    commit: dict[str, Any],
+    changes: list[dict[str, Any]],
+    max_files: int,
+    max_blob_bytes: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    diffs: list[dict[str, Any]] = []
+    flags: set[str] = set()
+    files_analyzed = 0
+    files_skipped = 0
+
+    if commit.get("is_merge"):
+        for change in changes[:max_files]:
+            path = change.get("path") or change.get("old_path")
+            diffs.append(
+                {
+                    "path": path,
+                    "old_path": change.get("old_path"),
+                    "status": change.get("status"),
+                    "language": detect_semantic_language(path),
+                    "result": "skipped",
+                    "reason": "merge_commit_not_supported",
+                }
+            )
+            files_skipped += 1
+        return diffs, {"files_analyzed": files_analyzed, "files_skipped": files_skipped, "flags": ["merge_skipped"]}
+
+    truncated = len(changes) > max_files
+    for change in changes[:max_files]:
+        diff = collect_one_semantic_diff(runner, commit, change, max_blob_bytes)
+        diffs.append(diff)
+        if diff.get("result") == "ok":
+            files_analyzed += 1
+            flags.update(diff.get("flags", []))
+        else:
+            files_skipped += 1
+            reason = diff.get("reason") or diff.get("result")
+            if reason:
+                flags.add(str(reason))
+    if truncated:
+        flags.add("file_limit_reached")
+    if any(flag not in {"ast_noop", "docstring_changed", "unsupported_language"} for flag in flags):
+        if any(diff.get("summary", {}).get("semantic_changed") for diff in diffs):
+            flags.add("semantic_change")
+    return diffs, {"files_analyzed": files_analyzed, "files_skipped": files_skipped, "flags": sorted(flags)}
+
+
+def collect_one_semantic_diff(
+    runner: GitRunner,
+    commit: dict[str, Any],
+    change: dict[str, Any],
+    max_blob_bytes: int,
+) -> dict[str, Any]:
+    path = change.get("path")
+    old_path = change.get("old_path")
+    status = change.get("status")
+    language = detect_semantic_language(path or old_path)
+    base = {
+        "path": path,
+        "old_path": old_path,
+        "status": status,
+        "language": language,
+    }
+    if language != "python":
+        return {**base, "result": "skipped", "reason": "unsupported_language"}
+
+    parent = commit.get("parents", [None])[0] if commit.get("parents") else None
+    sha = commit["sha"]
+    old_ref: str | None = None
+    new_ref: str | None = None
+    if status != "A" and parent:
+        old_ref = f"{parent}:{old_path or path}"
+    if status != "D" and path:
+        new_ref = f"{sha}:{path}"
+    base["old_ref"] = old_ref
+    base["new_ref"] = new_ref
+
+    old_source, old_error = read_python_blob(runner, old_ref, max_blob_bytes) if old_ref else (None, None)
+    new_source, new_error = read_python_blob(runner, new_ref, max_blob_bytes) if new_ref else (None, None)
+    if old_error or new_error:
+        return {
+            **base,
+            "result": "skipped",
+            "reason": old_error or new_error,
+        }
+
+    old_index, old_parse_error = build_python_ast_index(old_source, "old") if old_source is not None else (empty_ast_index(), None)
+    new_index, new_parse_error = build_python_ast_index(new_source, "new") if new_source is not None else (empty_ast_index(), None)
+    if old_parse_error or new_parse_error:
+        return {
+            **base,
+            "result": "parse_error",
+            "reason": old_parse_error or new_parse_error,
+        }
+
+    summary, flags = diff_python_ast_indexes(old_index, new_index)
+    return {
+        **base,
+        "result": "ok",
+        "summary": summary,
+        "flags": flags,
+    }
+
+
+def read_python_blob(
+    runner: GitRunner,
+    ref: str | None,
+    max_blob_bytes: int,
+) -> tuple[str | None, str | None]:
+    if not ref:
+        return None, None
+    size_result = runner.git("cat-file", "-s", ref, check=False)
+    if size_result.returncode != 0:
+        return None, "blob_unavailable"
+    try:
+        size = int(size_result.stdout.strip())
+    except ValueError:
+        return None, "blob_size_unknown"
+    if size > max_blob_bytes:
+        return None, "blob_too_large"
+    blob = runner.git_bytes("show", ref, check=False)
+    if blob.returncode != 0:
+        return None, "blob_unavailable"
+    try:
+        encoding, _ = tokenize.detect_encoding(io.BytesIO(blob.stdout).readline)
+        return blob.stdout.decode(encoding), None
+    except (SyntaxError, UnicodeDecodeError, LookupError):
+        try:
+            return blob.stdout.decode("utf-8"), None
+        except UnicodeDecodeError:
+            return None, "decode_error"
+
+
+def empty_ast_index() -> dict[str, Any]:
+    return {"imports": set(), "symbols": {}}
+
+
+def build_python_ast_index(source: str, side: str) -> tuple[dict[str, Any], str | None]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        return empty_ast_index(), f"{side}_parse_error:{exc.msg}"
+
+    index = empty_ast_index()
+    visit_python_body(tree.body, "", index)
+    return index, None
+
+
+def visit_python_body(body: list[ast.stmt], prefix: str, index: dict[str, Any]) -> None:
+    for node in body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            index["imports"].add(format_import_node(node))
+        elif isinstance(node, ast.ClassDef):
+            qualname = join_qualname(prefix, node.name)
+            index["symbols"][qualname] = class_symbol_info(node, qualname)
+            visit_python_body(node.body, qualname, index)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            qualname = join_qualname(prefix, node.name)
+            index["symbols"][qualname] = function_symbol_info(node, qualname)
+            visit_python_body(node.body, qualname, index)
+
+
+def join_qualname(prefix: str, name: str) -> str:
+    return f"{prefix}.{name}" if prefix else name
+
+
+def format_import_node(node: ast.Import | ast.ImportFrom) -> str:
+    if isinstance(node, ast.Import):
+        names = ", ".join(format_alias(alias) for alias in node.names)
+        return f"import {names}"
+    module = "." * node.level + (node.module or "")
+    names = ", ".join(format_alias(alias) for alias in node.names)
+    return f"from {module} import {names}"
+
+
+def format_alias(alias: ast.alias) -> str:
+    return f"{alias.name} as {alias.asname}" if alias.asname else alias.name
+
+
+def function_symbol_info(node: ast.FunctionDef | ast.AsyncFunctionDef, qualname: str) -> dict[str, Any]:
+    body = strip_docstring(node.body)
+    return {
+        "kind": "async_function" if isinstance(node, ast.AsyncFunctionDef) else "function",
+        "qualname": qualname,
+        "signature_hash": ast_digest([node.args, node.returns]),
+        "decorators_hash": ast_digest(node.decorator_list),
+        "body_hash": ast_digest(body),
+        "docstring_hash": text_digest(ast.get_docstring(node, clean=False)),
+    }
+
+
+def class_symbol_info(node: ast.ClassDef, qualname: str) -> dict[str, Any]:
+    body_without_doc = strip_docstring(node.body)
+    non_definition_body = [
+        item for item in body_without_doc if not isinstance(item, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    child_names = [
+        child.name
+        for child in node.body
+        if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    return {
+        "kind": "class",
+        "qualname": qualname,
+        "signature_hash": ast_digest([node.bases, node.keywords, child_names]),
+        "decorators_hash": ast_digest(node.decorator_list),
+        "body_hash": ast_digest(non_definition_body),
+        "docstring_hash": text_digest(ast.get_docstring(node, clean=False)),
+    }
+
+
+def strip_docstring(body: list[ast.stmt]) -> list[ast.stmt]:
+    if body and isinstance(body[0], ast.Expr):
+        value = body[0].value
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            return body[1:]
+    return body
+
+
+def ast_digest(value: Any) -> str:
+    if isinstance(value, list):
+        dumped = "[" + ",".join(ast.dump(item, include_attributes=False) if isinstance(item, ast.AST) else repr(item) for item in value) + "]"
+    elif isinstance(value, ast.AST):
+        dumped = ast.dump(value, include_attributes=False)
+    else:
+        dumped = repr(value)
+    return hashlib.sha256(dumped.encode("utf-8")).hexdigest()[:12]
+
+
+def text_digest(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def diff_python_ast_indexes(old_index: dict[str, Any], new_index: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    old_imports = set(old_index["imports"])
+    new_imports = set(new_index["imports"])
+    old_symbols: dict[str, dict[str, Any]] = old_index["symbols"]
+    new_symbols: dict[str, dict[str, Any]] = new_index["symbols"]
+    added_names = sorted(set(new_symbols) - set(old_symbols))
+    removed_names = sorted(set(old_symbols) - set(new_symbols))
+    common_names = sorted(set(old_symbols) & set(new_symbols))
+
+    symbols_added = [public_symbol(new_symbols[name]) for name in added_names]
+    symbols_removed = [public_symbol(old_symbols[name]) for name in removed_names]
+    symbols_modified: list[dict[str, Any]] = []
+    flags: set[str] = set()
+
+    for name in common_names:
+        old = old_symbols[name]
+        new = new_symbols[name]
+        item = {
+            "kind": new["kind"],
+            "qualname": name,
+            "signature_changed": old["signature_hash"] != new["signature_hash"],
+            "body_changed": old["body_hash"] != new["body_hash"],
+            "decorators_changed": old["decorators_hash"] != new["decorators_hash"],
+            "docstring_changed": old["docstring_hash"] != new["docstring_hash"],
+        }
+        if any(item[key] for key in ("signature_changed", "body_changed", "decorators_changed", "docstring_changed")):
+            symbols_modified.append(item)
+            if item["signature_changed"]:
+                flags.add("signature_changed")
+            if item["body_changed"]:
+                flags.add("function_body_changed" if item["kind"] in {"function", "async_function"} else "class_body_changed")
+            if item["decorators_changed"]:
+                flags.add("decorator_changed")
+            if item["docstring_changed"]:
+                flags.add("docstring_changed")
+
+    imports_added = sorted(new_imports - old_imports)
+    imports_removed = sorted(old_imports - new_imports)
+    if imports_added or imports_removed:
+        flags.add("import_changed")
+    if symbols_added:
+        flags.add("symbol_added")
+    if symbols_removed:
+        flags.add("symbol_removed")
+
+    semantic_modified = [
+        item
+        for item in symbols_modified
+        if item["signature_changed"] or item["body_changed"] or item["decorators_changed"]
+    ]
+    semantic_changed = bool(imports_added or imports_removed or symbols_added or symbols_removed or semantic_modified)
+    if not semantic_changed:
+        flags.add("ast_noop" if not symbols_modified else "docstring_only")
+
+    summary = {
+        "semantic_changed": semantic_changed,
+        "imports_added": imports_added,
+        "imports_removed": imports_removed,
+        "symbols_added": symbols_added,
+        "symbols_removed": symbols_removed,
+        "symbols_modified": symbols_modified,
+        "symbols_unchanged_count": len(common_names) - len(symbols_modified),
+    }
+    return summary, sorted(flags)
+
+
+def public_symbol(symbol: dict[str, Any]) -> dict[str, Any]:
+    return {"kind": symbol["kind"], "qualname": symbol["qualname"]}
 
 
 def collect_blame_survival(runner: GitRunner, query: dict[str, Any], files: list[str]) -> Counter:
@@ -836,6 +1264,379 @@ def build_people(commits: list[dict[str, Any]], blame_counts: Counter) -> list[d
     )
 
 
+def build_maintenance_signals(people: list[dict[str, Any]]) -> dict[str, Any]:
+    signals: list[dict[str, Any]] = []
+    for person in people[:10]:
+        roles: list[str] = []
+        if person["commit_count"] > 0:
+            roles.append("author_activity")
+        if person["weighted_importance"] >= 50:
+            roles.append("high_weight_local_history")
+        if person["current_blame_lines"] > 0:
+            roles.append("current_survivorship")
+        signals.append(
+            {
+                "identity": person["identity"],
+                "evidence_roles": roles,
+                "metrics": {
+                    "commit_count": person["commit_count"],
+                    "weighted_importance": person["weighted_importance"],
+                    "current_blame_lines": person["current_blame_lines"],
+                },
+                "caveat": "Activity, review, and blame signals are not ownership proof or performance judgment.",
+            }
+        )
+    return {
+        "caveat": "Use as maintenance evidence only. Do not infer private motivation, team politics, blame, or individual performance.",
+        "people": signals,
+    }
+
+
+def collect_external_evidence(
+    runner: GitRunner,
+    commits: list[dict[str, Any]],
+    query: dict[str, Any],
+    mode: str,
+    remote_limit: int,
+) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "schema_version": REMOTE_CONTEXT_SCHEMA_VERSION,
+        "enabled": mode != "off",
+        "provider": None,
+        "repository": None,
+        "remote_url": None,
+        "fetched_at": None,
+        "warnings": [],
+        "artifacts": [],
+        "recorded_rationales": [],
+        "collaboration_signals": [],
+        "caveat": "Remote evidence is opt-in and supports recorded collaboration facts only; it is not motivation, politics, or performance evidence.",
+    }
+    if mode == "off":
+        return base
+
+    remote = get_origin_remote(runner)
+    if not remote:
+        base["warnings"].append("No origin remote was found; remote evidence skipped.")
+        return base
+    base["remote_url"] = redact_remote_url(remote)
+    provider = parse_remote_provider(remote)
+    if not provider:
+        base["warnings"].append("Origin remote is not recognized as GitHub or GitLab; remote evidence skipped.")
+        return base
+    if mode != "auto" and mode != provider["provider"]:
+        base["warnings"].append(f"Requested provider {mode!r} does not match origin remote provider {provider['provider']!r}.")
+        return base
+
+    base["provider"] = provider["provider"]
+    base["repository"] = provider["slug"]
+    base["fetched_at"] = datetime.now(timezone.utc).isoformat()
+
+    if provider["provider"] == "github":
+        enrich_github_evidence(base, provider, commits[:remote_limit], query)
+    elif provider["provider"] == "gitlab":
+        enrich_gitlab_evidence(base, provider, commits[:remote_limit], query)
+    return base
+
+
+def get_origin_remote(runner: GitRunner) -> str | None:
+    result = runner.git("remote", "get-url", "origin", check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def redact_remote_url(remote: str) -> str:
+    return re.sub(r"(https?://)[^/@\s]+@", r"\1redacted@", remote)
+
+
+def parse_remote_provider(remote: str) -> dict[str, str] | None:
+    github = parse_hosted_git_remote(remote, "github.com")
+    if github:
+        return {"provider": "github", "slug": github, "api_base": "https://api.github.com"}
+    gitlab = parse_hosted_git_remote(remote, "gitlab.com")
+    if gitlab:
+        return {"provider": "gitlab", "slug": gitlab, "api_base": "https://gitlab.com/api/v4"}
+    return None
+
+
+def parse_hosted_git_remote(remote: str, host: str) -> str | None:
+    ssh_match = re.match(rf"git@{re.escape(host)}:(?P<slug>.+?)(?:\.git)?$", remote)
+    if ssh_match:
+        return strip_git_suffix(ssh_match.group("slug"))
+    parsed = urllib.parse.urlparse(remote)
+    if parsed.hostname == host:
+        return strip_git_suffix(parsed.path.strip("/"))
+    return None
+
+
+def strip_git_suffix(slug: str) -> str:
+    return slug[:-4] if slug.endswith(".git") else slug
+
+
+def enrich_github_evidence(
+    external: dict[str, Any],
+    provider: dict[str, str],
+    commits: list[dict[str, Any]],
+    query: dict[str, Any],
+) -> None:
+    slug = provider["slug"]
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "code-archaeology-skill",
+    }
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    seen_artifacts: set[str] = set()
+    issue_numbers: set[str] = set()
+
+    for commit in commits:
+        sha = commit["sha"]
+        for ref in commit.get("recorded_context", {}).get("issue_references", []):
+            if ref.get("number"):
+                issue_numbers.add(str(ref["number"]))
+        pr_url = f"{provider['api_base']}/repos/{slug}/commits/{sha}/pulls"
+        prs = fetch_json(pr_url, headers, external["warnings"])
+        if not isinstance(prs, list):
+            continue
+        for pr in prs:
+            number = str(pr.get("number") or "")
+            if not number:
+                continue
+            artifact_id = f"GH-PR-{number}"
+            if artifact_id in seen_artifacts:
+                continue
+            seen_artifacts.add(artifact_id)
+            body = pr.get("body") or ""
+            title = pr.get("title") or ""
+            artifact = {
+                "id": artifact_id,
+                "type": "pull_request",
+                "url": pr.get("html_url"),
+                "title": title,
+                "state": pr.get("state"),
+                "author": (pr.get("user") or {}).get("login"),
+                "created_at": pr.get("created_at"),
+                "merged_at": pr.get("merged_at"),
+                "merge_commit_sha": pr.get("merge_commit_sha"),
+                "related_commits": [sha],
+                "related_paths": query.get("normalized_paths", []),
+                "link_method": "commit_pull_requests_api",
+                "link_confidence": 0.95,
+                "referenced_issues": extract_issue_references("\n".join([title, body])),
+                "limitations": [],
+            }
+            reviews = fetch_json(f"{provider['api_base']}/repos/{slug}/pulls/{number}/reviews", headers, external["warnings"])
+            if isinstance(reviews, list):
+                artifact["reviewers"] = compact_github_reviews(reviews)
+            external["artifacts"].append(artifact)
+            append_external_rationales(external, artifact_id, "\n".join([title, body]), artifact.get("author"), artifact.get("created_at"))
+
+    for number in sorted(issue_numbers)[:20]:
+        artifact_id = f"GH-ISSUE-{number}"
+        if artifact_id in seen_artifacts:
+            continue
+        issue = fetch_json(f"{provider['api_base']}/repos/{slug}/issues/{number}", headers, external["warnings"])
+        if not isinstance(issue, dict) or not issue.get("number"):
+            continue
+        seen_artifacts.add(artifact_id)
+        artifact_type = "pull_request" if issue.get("pull_request") else "issue"
+        artifact = {
+            "id": artifact_id,
+            "type": artifact_type,
+            "url": issue.get("html_url"),
+            "title": issue.get("title"),
+            "state": issue.get("state"),
+            "author": (issue.get("user") or {}).get("login"),
+            "created_at": issue.get("created_at"),
+            "closed_at": issue.get("closed_at"),
+            "related_commits": [],
+            "related_paths": query.get("normalized_paths", []),
+            "link_method": "commit_text_reference",
+            "link_confidence": 0.65,
+            "labels": [label.get("name") for label in issue.get("labels", []) if isinstance(label, dict)],
+            "limitations": ["Commit text reference does not prove causality."],
+        }
+        external["artifacts"].append(artifact)
+        append_external_rationales(external, artifact_id, "\n".join([issue.get("title") or "", issue.get("body") or ""]), artifact.get("author"), artifact.get("created_at"))
+
+    external["collaboration_signals"] = build_remote_collaboration_signals(external["artifacts"])
+
+
+def compact_github_reviews(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compacted: list[dict[str, Any]] = []
+    seen: set[tuple[str | None, str | None]] = set()
+    for review in reviews:
+        login = (review.get("user") or {}).get("login")
+        state = review.get("state")
+        key = (login, state)
+        if key in seen:
+            continue
+        compacted.append({"login": login, "role": str(state or "").lower(), "date": review.get("submitted_at")})
+        seen.add(key)
+    return compacted[:20]
+
+
+def enrich_gitlab_evidence(
+    external: dict[str, Any],
+    provider: dict[str, str],
+    commits: list[dict[str, Any]],
+    query: dict[str, Any],
+) -> None:
+    slug = provider["slug"]
+    encoded_slug = urllib.parse.quote(slug, safe="")
+    headers = {"User-Agent": "code-archaeology-skill"}
+    token = os.environ.get("GITLAB_TOKEN") or os.environ.get("GL_TOKEN")
+    if token:
+        headers["PRIVATE-TOKEN"] = token
+    seen_artifacts: set[str] = set()
+    issue_numbers: set[str] = set()
+    for commit in commits:
+        sha = commit["sha"]
+        for ref in commit.get("recorded_context", {}).get("issue_references", []):
+            if ref.get("number"):
+                issue_numbers.add(str(ref["number"]))
+        url = f"{provider['api_base']}/projects/{encoded_slug}/repository/commits/{sha}/merge_requests"
+        merge_requests = fetch_json(url, headers, external["warnings"])
+        if not isinstance(merge_requests, list):
+            continue
+        for mr in merge_requests:
+            iid = str(mr.get("iid") or mr.get("id") or "")
+            if not iid:
+                continue
+            artifact_id = f"GL-MR-{iid}"
+            if artifact_id in seen_artifacts:
+                continue
+            seen_artifacts.add(artifact_id)
+            artifact = {
+                "id": artifact_id,
+                "type": "merge_request",
+                "url": mr.get("web_url"),
+                "title": mr.get("title"),
+                "state": mr.get("state"),
+                "author": (mr.get("author") or {}).get("username"),
+                "created_at": mr.get("created_at"),
+                "merged_at": mr.get("merged_at"),
+                "merge_commit_sha": mr.get("merge_commit_sha"),
+                "related_commits": [sha],
+                "related_paths": query.get("normalized_paths", []),
+                "link_method": "commit_merge_requests_api",
+                "link_confidence": 0.9,
+                "referenced_issues": extract_issue_references("\n".join([mr.get("title") or "", mr.get("description") or ""])),
+                "limitations": [],
+            }
+            external["artifacts"].append(artifact)
+            append_external_rationales(
+                external,
+                artifact_id,
+                "\n".join([mr.get("title") or "", mr.get("description") or ""]),
+                artifact.get("author"),
+                artifact.get("created_at"),
+            )
+    for number in sorted(issue_numbers)[:20]:
+        artifact_id = f"GL-ISSUE-{number}"
+        if artifact_id in seen_artifacts:
+            continue
+        issue = fetch_json(f"{provider['api_base']}/projects/{encoded_slug}/issues/{number}", headers, external["warnings"])
+        if not isinstance(issue, dict) or not issue.get("iid"):
+            continue
+        seen_artifacts.add(artifact_id)
+        artifact = {
+            "id": artifact_id,
+            "type": "issue",
+            "url": issue.get("web_url"),
+            "title": issue.get("title"),
+            "state": issue.get("state"),
+            "author": (issue.get("author") or {}).get("username"),
+            "created_at": issue.get("created_at"),
+            "closed_at": issue.get("closed_at"),
+            "related_commits": [],
+            "related_paths": query.get("normalized_paths", []),
+            "link_method": "commit_text_reference",
+            "link_confidence": 0.65,
+            "labels": issue.get("labels", []),
+            "limitations": ["Commit text reference does not prove causality."],
+        }
+        external["artifacts"].append(artifact)
+        append_external_rationales(
+            external,
+            artifact_id,
+            "\n".join([issue.get("title") or "", issue.get("description") or ""]),
+            artifact.get("author"),
+            artifact.get("created_at"),
+        )
+    external["collaboration_signals"] = build_remote_collaboration_signals(external["artifacts"])
+
+
+def fetch_json(url: str, headers: dict[str, str], warnings: list[str]) -> Any:
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            body = response.read()
+    except urllib.error.HTTPError as exc:
+        warnings.append(f"Remote fetch failed {exc.code}: {url}")
+        return None
+    except urllib.error.URLError as exc:
+        warnings.append(f"Remote fetch failed: {exc.reason}")
+        return None
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        warnings.append(f"Remote response was not valid JSON: {url}")
+        return None
+
+
+def append_external_rationales(
+    external: dict[str, Any],
+    artifact_id: str,
+    text: str,
+    author: str | None,
+    date: str | None,
+) -> None:
+    for item in extract_explicit_rationales(text):
+        external["recorded_rationales"].append(
+            {
+                "id": f"R{len(external['recorded_rationales']) + 1}",
+                "source_artifact": artifact_id,
+                "statement_type": item["statement_type"],
+                "text": item["text"],
+                "author": author,
+                "date": date,
+                "confidence": 0.8,
+                "caveat": "Recorded rationale only; not a private motive inference.",
+            }
+        )
+
+
+def build_remote_collaboration_signals(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    people: dict[str, dict[str, Any]] = {}
+    for artifact in artifacts:
+        author = artifact.get("author")
+        if author:
+            entry = people.setdefault(author, {"person": author, "roles": Counter(), "artifact_ids": []})
+            entry["roles"]["author"] += 1
+            entry["artifact_ids"].append(artifact["id"])
+        for review in artifact.get("reviewers", []):
+            login = review.get("login")
+            if not login:
+                continue
+            entry = people.setdefault(login, {"person": login, "roles": Counter(), "artifact_ids": []})
+            entry["roles"][review.get("role") or "reviewer"] += 1
+            entry["artifact_ids"].append(artifact["id"])
+    signals: list[dict[str, Any]] = []
+    for entry in people.values():
+        signals.append(
+            {
+                "person": entry["person"],
+                "evidence_roles": dict(entry["roles"]),
+                "artifact_ids": sorted(set(entry["artifact_ids"])),
+                "caveat": "Collaboration activity is not ownership proof or performance judgment.",
+            }
+        )
+    return sorted(signals, key=lambda item: sum(item["evidence_roles"].values()), reverse=True)
+
+
 def build_timeline_candidates(commits: list[dict[str, Any]]) -> list[dict[str, Any]]:
     buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for commit in commits:
@@ -921,22 +1722,32 @@ def collect_all(args: argparse.Namespace) -> dict[str, Any]:
             total,
         )
         review = build_agent_review(commit, query, importance["score"], flags)
-        commits.append(
-            {
-                **commit,
-                "changed_paths": changed_paths,
-                "target_stats": {
-                    "files": stats["files"],
-                    "added": stats["added"],
-                    "deleted": stats["deleted"],
-                    "binary_files": stats["binary_files"],
-                },
-                "flags": flags,
-                "importance": importance,
-                "agent_review": review,
-                "changes": changes,
-            }
-        )
+        commit_payload = {
+            **commit,
+            "changed_paths": changed_paths,
+            "target_stats": {
+                "files": stats["files"],
+                "added": stats["added"],
+                "deleted": stats["deleted"],
+                "binary_files": stats["binary_files"],
+            },
+            "flags": flags,
+            "importance": importance,
+            "agent_review": review,
+            "changes": changes,
+            "recorded_context": build_recorded_context(commit),
+        }
+        if args.ast_diff:
+            semantic_diffs, semantic_summary = collect_semantic_diffs(
+                runner,
+                commit,
+                changes,
+                args.ast_max_files,
+                args.ast_max_blob_bytes,
+            )
+            commit_payload["semantic_diffs"] = semantic_diffs
+            commit_payload["semantic_diff_summary"] = semantic_summary
+        commits.append(commit_payload)
 
     commits.sort(key=lambda item: (item["importance"]["score"], item["author_date"]), reverse=True)
     if args.top_k and args.top_k > 0:
@@ -947,21 +1758,45 @@ def collect_all(args: argparse.Namespace) -> dict[str, Any]:
                 commit["agent_review"]["priority"] = "medium"
                 commit["agent_review"]["reason"] = "Read because commit is inside the top-k evidence window."
 
+    people = build_people(commits, blame_counts)
     payload = {
         "schema_version": SCHEMA_VERSION,
         "repo": repo_info,
         "query": query,
         "collection": {
             "commands_run": runner.commands_run,
-            "limits": {"max_commits": args.max_commits, "top_k_enriched": args.top_k},
+            "limits": {
+                "max_commits": args.max_commits,
+                "top_k_enriched": args.top_k,
+                "ast_max_files_per_commit": args.ast_max_files,
+                "ast_max_blob_bytes": args.ast_max_blob_bytes,
+                "remote_limit": args.remote_limit,
+            },
             "rev_range": args.rev_range,
             "since": args.since,
             "until": args.until,
             "warnings": warnings,
         },
+        "semantic_diff": {
+            "enabled": bool(args.ast_diff),
+            "schema_version": AST_DIFF_SCHEMA_VERSION,
+            "languages": ["python"],
+            "limits": {
+                "max_files_per_commit": args.ast_max_files,
+                "max_blob_bytes": args.ast_max_blob_bytes,
+            },
+        },
         "path_lineage": build_path_lineage(commits),
         "commits": commits,
-        "people": build_people(commits, blame_counts),
+        "people": people,
+        "maintenance_signals": build_maintenance_signals(people),
+        "external_evidence": collect_external_evidence(
+            runner,
+            commits,
+            query,
+            args.remote_context,
+            args.remote_limit,
+        ),
         "timeline_candidates": build_timeline_candidates(commits),
     }
     return payload
@@ -979,6 +1814,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-commits", type=int, default=300, help="Maximum candidate commits to collect.")
     parser.add_argument("--top-k", type=int, default=20, help="Number of top commits to force into review.")
     parser.add_argument("--no-merges", action="store_true", help="Exclude merge commits from initial collection.")
+    parser.add_argument("--ast-diff", action="store_true", help="Add Python AST symbol diff evidence for changed files.")
+    parser.add_argument(
+        "--ast-max-files",
+        type=int,
+        default=DEFAULT_AST_MAX_FILES,
+        help="Maximum files per commit to analyze with --ast-diff.",
+    )
+    parser.add_argument(
+        "--ast-max-blob-bytes",
+        type=int,
+        default=DEFAULT_AST_MAX_BLOB_BYTES,
+        help="Maximum blob size to parse with --ast-diff.",
+    )
+    parser.add_argument(
+        "--remote-context",
+        choices=["off", "auto", "github", "gitlab"],
+        default="off",
+        help="Optionally fetch GitHub/GitLab PR and issue evidence. Default: off.",
+    )
+    parser.add_argument(
+        "--remote-limit",
+        type=int,
+        default=20,
+        help="Maximum top-ranked commits to enrich when --remote-context is enabled.",
+    )
     parser.add_argument("--output", help="Write JSON to this file instead of stdout.")
     return parser
 

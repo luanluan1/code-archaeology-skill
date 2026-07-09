@@ -30,4 +30,5 @@ The collector's importance score ranks commits for review. It is not a truth sco
 - Promote lower-score commits if they are lifecycle events.
 - Demote high-score commits if the diff is mechanical.
 - Use `importance.factors` in the evidence index when explaining why a commit was considered key.
+- Use optional `semantic_diffs` and `external_evidence` as extra evidence, not as automatic score truth.
 - Never say a score proves causality.

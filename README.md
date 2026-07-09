@@ -12,7 +12,7 @@
   <a href="skill/code-archaeology/SKILL.md"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex-Skill-111827?style=flat-square"></a>
   <a href="tests/test_collect_git_history.py"><img alt="Tests" src="https://img.shields.io/badge/tests-unittest-2563eb?style=flat-square"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a?style=flat-square"></a>
-  <img alt="No network required at runtime" src="https://img.shields.io/badge/runtime-local_git_only-7c3aed?style=flat-square">
+  <img alt="Local first, remote opt-in" src="https://img.shields.io/badge/runtime-local_first_remote_opt--in-7c3aed?style=flat-square">
 </p>
 
 `code-archaeology` 是一个 Codex skill，用来回答这类问题：
@@ -21,9 +21,9 @@
 
 它会先从本地 git 历史里收集证据，再让 Codex 阅读关键 diff，最后产出包含关键 commit、关键人、历史转折点、遗留约束和未知项的工程报告。
 
-运行时不依赖 GitHub API，也不会编造 PR、issue 或作者动机。如果本地 git 历史证明不了，报告必须明确写成未知。
+默认运行不依赖 GitHub/GitLab API，也不会编造 PR、issue、作者动机或组织故事。如果证据证明不了，报告必须明确写成未知。
 
-当前版本专注本地 git 历史；PR、issue、远端平台数据可以作为后续扩展。
+需要时可以显式开启远端协作证据、Python AST 级结构差异，以及离线 HTML 时间线。它们都是证据增强，不会替代 Codex 阅读关键 diff 后写出的判断。
 
 ## 能输出什么
 
@@ -46,6 +46,15 @@
 ```
 
 它适合接手旧模块、准备重构、评估高风险文件，或者解释“为什么这里这么复杂”。
+
+## 能力边界
+
+- 默认只读本地 git：`log`、`show`、`blame`、rename/copy lineage、评分和关键 diff 推荐。
+- 可选远端证据：用户明确要求后，用 `--remote-context auto` 抓取 GitHub/GitLab PR、issue、review 和记录中的理由。
+- 可选 AST diff：用 `--ast-diff` 分析 Python `.py`/`.pyi` 的 import、函数、类、签名和 body 变化。
+- 可选可视化：把 collector JSON 渲染成离线 HTML 时间线，方便浏览阶段、commit、flags、人员信号和警告。
+
+不会做的事也很明确：不推断隐藏动机、组织政治、责任归因或个人绩效；commit 数、review 数和 blame 行数只能作为维护信号。
 
 ## 安装
 
@@ -153,6 +162,10 @@ collector 支持：
 - shallow clone 警告
 - generated/vendor/lockfile 和格式化噪音降权
 - 作者活跃度、加权重要性、当前 blame 行数
+- 记录中的 issue/PR 引用和显式理由摘取
+- 可选 GitHub/GitLab PR、issue、review 证据补充
+- 可选 Python AST 符号级 diff
+- 可选离线 HTML 时间线渲染
 - 给 Codex 阅读的 `git show` 推荐命令
 
 示例：
@@ -165,6 +178,31 @@ python skill/code-archaeology/scripts/collect_git_history.py \
   src/click/core.py
 ```
 
+可选增强：
+
+```bash
+# Python AST 符号 diff
+python skill/code-archaeology/scripts/collect_git_history.py \
+  --repo /path/to/repo \
+  --ast-diff \
+  --output archaeology.json \
+  src/auth.py
+
+# 显式开启 GitHub/GitLab PR、issue、review 证据
+python skill/code-archaeology/scripts/collect_git_history.py \
+  --repo /path/to/repo \
+  --remote-context auto \
+  --output archaeology.json \
+  src/auth
+
+# 渲染离线 HTML 时间线
+python skill/code-archaeology/scripts/render_timeline_html.py \
+  archaeology.json \
+  --output timeline.html
+```
+
+远端证据默认关闭。私有仓库的 PR/issue/review 可能包含内部路径、用户名或业务信息，分享 JSON/HTML 前请先检查。
+
 ## 真实 Smoke Test
 
 这个仓库已经用真实公开项目 `pallets/click` 跑过 smoke test：
@@ -174,10 +212,31 @@ python skill/code-archaeology/scripts/collect_git_history.py \
 - 历史完整性：`true`
 - 警告：无
 - top evidence 包含 bugfix、revert、refactor 信号
+- 本项目自身已用 `--ast-diff` 和 HTML renderer 做过真实回归
 
 见 [examples/click-core-summary.json](examples/click-core-summary.json) 和 [examples/sample-report.md](examples/sample-report.md)。
 
 后续又用本项目自身跑目录级真实测试，发现并修复了 Windows UTF-8 解码问题，回归测试已加入 `tests/test_collect_git_history.py`。
+
+本次功能扩展也用本仓库自身做了真实联通测试：
+
+```bash
+python skill/code-archaeology/scripts/collect_git_history.py \
+  --repo . \
+  --max-commits 25 \
+  --top-k 8 \
+  --ast-diff \
+  --remote-context auto \
+  --remote-limit 3 \
+  --output .tmp-real/self-evidence.json \
+  skill/code-archaeology/scripts/collect_git_history.py
+
+python skill/code-archaeology/scripts/render_timeline_html.py \
+  .tmp-real/self-evidence.json \
+  --output .tmp-real/self-timeline.html
+```
+
+真实结果：采集到 `2` 个相关 commit，Python AST 分析 `2` 个文件版本成功，识别出 `import_changed`、`symbol_added`、`signature_changed`、`function_body_changed` 等信号；远端识别为 GitHub，本仓库这些提交没有关联 PR artifact，warning 为空；HTML 时间线成功生成。
 
 ## 仓库结构
 
@@ -192,8 +251,12 @@ python skill/code-archaeology/scripts/collect_git_history.py \
 │       │   ├── report-template.md
 │       │   ├── scoring.md
 │       │   └── workflow.md
-│       └── scripts/collect_git_history.py
-├── tests/test_collect_git_history.py
+│       └── scripts/
+│           ├── collect_git_history.py
+│           └── render_timeline_html.py
+├── tests/
+│   ├── test_collect_git_history.py
+│   └── test_render_timeline_html.py
 ├── docs/design.md
 └── examples/
 ```
@@ -206,6 +269,7 @@ skill 包保持精简；面向人的说明文档放在仓库根目录。
 
 ```bash
 python tests/test_collect_git_history.py
+python tests/test_render_timeline_html.py
 ```
 
 校验 skill：

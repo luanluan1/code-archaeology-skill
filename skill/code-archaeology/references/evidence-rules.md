@@ -12,6 +12,8 @@ Examples:
 - `[E1] commit abc1234 2025-03-17 "Extract auth middleware"; src/auth/middleware.ts; hunk @@ -42,8 +58,21`
 - `[E2] HEAD:src/auth/index.ts:37`
 - `[E3] command: git log --follow -- src/auth/session.ts`
+- `[E4] GitHub PR #123, fetched 2026-07-09, linked by merge commit abc1234`
+- `[E5] AST diff for commit abc1234: function login signature/body changed`
 - `[I1] Inferred from E4 and E5: the module boundary shifted from request handling to reusable auth policy. No direct design note was found.`
 
 ## Claim Rules
@@ -23,6 +25,9 @@ Examples:
 - Diffs are stronger evidence for behavior, structure, dependencies, and file movement.
 - Blame is evidence of current survivorship, not authorship of the whole design.
 - Author count is evidence of activity, not ownership by itself.
+- PRs, issues, reviews, and CODEOWNERS are collaboration evidence only when fetched or supplied.
+- AST diff is structural evidence about changed symbols/imports, not proof of intent or runtime behavior.
+- Recorded rationale means "what the artifact says"; it is not private motivation.
 
 ## Prohibited Claims Without Direct Evidence
 
@@ -30,6 +35,9 @@ Examples:
 - "The author intended..."
 - "This was caused by customer requirements..."
 - "PR review forced..."
+- "The organization politics were..."
+- "This person performed well/poorly..."
+- "This person is responsible for the problem..."
 - "This was the first/original implementation..." when history is shallow, squashed, or incomplete.
 - "This person owns the module..." from commit count alone.
 

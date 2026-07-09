@@ -75,7 +75,7 @@ class CollectGitHistoryTests(unittest.TestCase):
             )
             payload = json.loads(result.stdout)
 
-        self.assertEqual(payload["schema_version"], "0.1")
+        self.assertEqual(payload["schema_version"], "0.2")
         self.assertTrue(payload["repo"]["history_complete"])
         self.assertEqual(payload["query"]["target_type"], "file")
         self.assertIn("src/auth.py", payload["query"]["normalized_paths"])
@@ -154,6 +154,116 @@ class CollectGitHistoryTests(unittest.TestCase):
         self.assertEqual(payload["query"]["target_type"], "directory")
         self.assertEqual(len(payload["commits"]), 1)
         self.assertEqual(payload["people"][0]["current_blame_lines"], 3)
+
+    def test_records_issue_references_and_explicit_rationale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            run(["git", "init"], cwd=repo)
+            run(["git", "config", "user.email", "tester@example.com"], cwd=repo)
+            run(["git", "config", "user.name", "Test Author"], cwd=repo)
+
+            src = repo / "src"
+            src.mkdir()
+            auth = src / "auth.py"
+            auth.write_text("def login(user):\n    return bool(user)\n", encoding="utf-8")
+            run(["git", "add", "src/auth.py"], cwd=repo)
+            run(
+                [
+                    "git",
+                    "commit",
+                    "-m",
+                    "Refactor auth boundary (#42)",
+                    "-m",
+                    "Reason: because policy checks need reuse.",
+                    "-m",
+                    "Fixes #7",
+                ],
+                cwd=repo,
+            )
+
+            result = run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--max-commits",
+                    "20",
+                    "src/auth.py",
+                ],
+                cwd=repo,
+            )
+            payload = json.loads(result.stdout)
+
+        commit = payload["commits"][0]
+        numbers = {item["number"] for item in commit["recorded_context"]["issue_references"]}
+        self.assertIn("42", numbers)
+        self.assertIn("7", numbers)
+        rationale_text = " ".join(item["text"] for item in commit["recorded_context"]["explicit_rationales"])
+        self.assertIn("policy checks need reuse", rationale_text)
+        self.assertFalse(payload["external_evidence"]["enabled"])
+
+    def test_ast_diff_detects_python_symbol_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            run(["git", "init"], cwd=repo)
+            run(["git", "config", "user.email", "tester@example.com"], cwd=repo)
+            run(["git", "config", "user.name", "Test Author"], cwd=repo)
+
+            src = repo / "src"
+            src.mkdir()
+            auth = src / "auth.py"
+            auth.write_text(
+                "import os\n\n"
+                "def login(user):\n"
+                "    return bool(user)\n",
+                encoding="utf-8",
+            )
+            run(["git", "add", "src/auth.py"], cwd=repo)
+            run(["git", "commit", "-m", "Add auth module"], cwd=repo)
+
+            auth.write_text(
+                "import os\n"
+                "import hmac\n\n"
+                "def login(user, *, active=True):\n"
+                "    if not active:\n"
+                "        return False\n"
+                "    return bool(user)\n\n"
+                "class Policy:\n"
+                "    pass\n",
+                encoding="utf-8",
+            )
+            run(["git", "add", "src/auth.py"], cwd=repo)
+            run(["git", "commit", "-m", "Change auth semantic structure"], cwd=repo)
+
+            result = run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--max-commits",
+                    "20",
+                    "--ast-diff",
+                    "src/auth.py",
+                ],
+                cwd=repo,
+            )
+            payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["schema_version"], "0.2")
+        self.assertTrue(payload["semantic_diff"]["enabled"])
+        commit = next(item for item in payload["commits"] if item["subject"] == "Change auth semantic structure")
+        self.assertIn("semantic_change", commit["semantic_diff_summary"]["flags"])
+        self.assertIn("signature_changed", commit["semantic_diff_summary"]["flags"])
+        diff = commit["semantic_diffs"][0]
+        self.assertEqual(diff["result"], "ok")
+        self.assertIn("import hmac", diff["summary"]["imports_added"])
+        modified = {item["qualname"]: item for item in diff["summary"]["symbols_modified"]}
+        self.assertTrue(modified["login"]["signature_changed"])
+        self.assertTrue(modified["login"]["body_changed"])
+        added = {item["qualname"] for item in diff["summary"]["symbols_added"]}
+        self.assertIn("Policy", added)
 
 
 if __name__ == "__main__":

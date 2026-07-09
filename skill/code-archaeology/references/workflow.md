@@ -15,10 +15,39 @@ Use the collector's `query.target_type`:
 
 1. Read `collection.warnings` and `query.ambiguities`.
 2. Skim `path_lineage` for birth, delete, rename, copy, and move.
-3. Read high-priority `agent_review.read_commands`.
-4. Read enough medium-priority commits to explain every major phase.
-5. Inspect current files before writing "current shape".
-6. Build phases from evidence, not from equal time intervals.
+3. Skim `recorded_context` for issue references and explicit rationale, but do not treat it as causality.
+4. Skim `semantic_diffs` when present to spot Python symbol/import changes before opening patches.
+5. Read high-priority `agent_review.read_commands`.
+6. Read enough medium-priority commits to explain every major phase.
+7. Inspect current files before writing "current shape".
+8. Build phases from evidence, not from equal time intervals.
+
+## Optional Remote Evidence
+
+Remote evidence is off by default. Enable it only when the user asks for PR, issue, review, GitHub, GitLab, or recorded-rationale context.
+
+- Use `--remote-context auto` for recognized GitHub/GitLab remotes.
+- Treat API failures and missing artifacts as limitations, not as absence of history.
+- Link strength matters: commit-to-PR API links are stronger than `#123` text references.
+- Never infer private motivation, organization politics, blame, or performance from remote artifacts.
+
+## Optional AST Diff
+
+Use `--ast-diff` when the user asks for semantic or AST-level evidence.
+
+- Current support is Python `.py`/`.pyi` via stdlib `ast`.
+- Non-Python files, large blobs, parse errors, and merge commits are recorded as skipped.
+- AST output helps choose diffs to read; it does not replace reading important patches.
+
+## Optional Visual Timeline
+
+After saving collector output, render an offline HTML evidence index when the user asks for a visual timeline:
+
+```bash
+python <skill-dir>/scripts/render_timeline_html.py archaeology.json --output timeline.html
+```
+
+Do not present the HTML as a full report. It is a browser-friendly index over collected evidence.
 
 ## Merge Commits
 
