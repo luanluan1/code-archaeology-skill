@@ -124,6 +124,37 @@ class CollectGitHistoryTests(unittest.TestCase):
             )
         )
 
+    def test_collects_directory_with_utf8_content_on_windows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            run(["git", "init"], cwd=repo)
+            run(["git", "config", "user.email", "tester@example.com"], cwd=repo)
+            run(["git", "config", "user.name", "Test Author"], cwd=repo)
+
+            docs = repo / "docs"
+            docs.mkdir()
+            (docs / "notes.md").write_text("# 代码考古\n\n模块演化与关键提交。\n", encoding="utf-8")
+            run(["git", "add", "docs/notes.md"], cwd=repo)
+            run(["git", "commit", "-m", "Add Chinese archaeology notes"], cwd=repo)
+
+            result = run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--max-commits",
+                    "20",
+                    "docs",
+                ],
+                cwd=repo,
+            )
+            payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["query"]["target_type"], "directory")
+        self.assertEqual(len(payload["commits"]), 1)
+        self.assertEqual(payload["people"][0]["current_blame_lines"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()
